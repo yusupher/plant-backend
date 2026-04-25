@@ -58,23 +58,30 @@ app.post("/detect-disease", upload.single("image"), async (req, res) => {
 
     const data = await response.json();
 
-    console.log("HF Response:", data);
+    console.log("HF RESPONSE:", data);
 
-    // ✅ FIX: correct parsing for Hugging Face response
-    const label = data?.[0]?.label;
-    const score = data?.[0]?.score;
+    // ✅ SAFE CHECK (VERY IMPORTANT)
+    if (Array.isArray(data) && data.length > 0) {
 
-    res.json({
-      result: label || "Could not detect",
-      confidence: score || 0
-    });
+      const best = data[0];
+
+      res.json({
+        result: best.label || "Unknown",
+        confidence: best.score || 0
+      });
+
+    } else {
+      res.json({
+        result: "Model loading or no detection",
+        confidence: 0
+      });
+    }
 
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 
 });
-
 
 /* =========================
    🚀 START SERVER
