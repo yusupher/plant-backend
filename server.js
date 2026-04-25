@@ -42,10 +42,18 @@ app.post("/identify", upload.single("image"), async (req, res) => {
 app.post("/detect-disease", upload.single("image"), async (req, res) => {
 
   try {
+
+    if (!req.file) {
+      return res.status(400).json({
+        result: "No image uploaded",
+        confidence: 0
+      });
+    }
+
     const imageBuffer = req.file.buffer;
 
     const response = await fetch(
-      "https://api-inference.huggingface.co/models/linkingpark/plant-disease-detection",
+      "https://api-inference.huggingface.co/models/plantdoc/plant-disease-classifier",
       {
         method: "POST",
         headers: {
@@ -60,50 +68,28 @@ app.post("/detect-disease", upload.single("image"), async (req, res) => {
 
     console.log("HF RESPONSE:", data);
 
-    // =========================
-    // ❌ MODEL ERROR / LOADING
-    // =========================
-    if (!data || data.error) {
+    if (!Array.isArray(data) || data.length === 0 || data.error) {
       return res.json({
-        result: "⏳ AI model loading, try again",
-        confidence: 0
-      });
-    }
-
-    // =========================
-    // ❌ EMPTY RESPONSE
-    // =========================
-    if (!Array.isArray(data) || data.length === 0) {
-      return res.json({
-        result: "⚠️ No disease detected",
+        result: "No disease detected",
         confidence: 0
       });
     }
 
     const top = data[0];
 
-    // =========================
-    // 🌱 HEALTH CHECK
-    // =========================
-    const label = top.label.toLowerCase();
-
-    const isHealthy =
-      label.includes("healthy") ||
-      top.score < 0.55;
-
     return res.json({
-      result: isHealthy
-        ? "🌱 Healthy plant (No disease detected)"
-        : top.label,
-      confidence: top.score
+      result: top.label || "Unknown",
+      confidence: top.score || 0
     });
 
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({
+      error: "Server crashed: " + err.message
+    });
   }
 
 });
-
 
 /* =========================
    🚀 START SERVER
