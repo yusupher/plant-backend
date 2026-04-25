@@ -9,7 +9,9 @@ const upload = multer();
 
 app.use(cors());
 
-// PlantNet API bridge
+/* =========================
+   🌿 PlantNet API (Plant ID)
+========================= */
 app.post("/identify", upload.single("image"), async (req, res) => {
 
   const form = new FormData();
@@ -32,25 +34,54 @@ app.post("/identify", upload.single("image"), async (req, res) => {
   }
 
 });
-app.post("/detect-disease", (req, res) => {
 
-  const diseases = [
-    "🌽 Maize Rust",
-    "🍂 Leaf Blight",
-    "🌱 Healthy Plant",
-    "🍄 Fungal Infection",
-    "⚠️ Bacterial Spot"
-  ];
 
-  const result = diseases[Math.floor(Math.random() * diseases.length)];
+/* =========================
+   🦠 Disease Detection (AI)
+========================= */
+app.post("/detect-disease", upload.single("image"), async (req, res) => {
 
-  res.json({
-    success: true,
-    result: result,
-    advice: "Check leaves, remove infected parts, improve soil moisture"
-  });
+  try {
+    const imageBuffer = req.file.buffer;
+
+    const response = await fetch(
+      "https://api-inference.huggingface.co/models/nateraw/plant-disease-classification",
+      {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${process.env.HF_TOKEN}`,
+          "Content-Type": "application/octet-stream"
+        },
+        body: imageBuffer
+      }
+    );
+
+    const data = await response.json();
+
+    console.log("HF Response:", data);
+
+    if (Array.isArray(data) && data.length > 0) {
+      res.json({
+        result: data[0].label,
+        confidence: data[0].score
+      });
+    } else {
+      res.json({
+        result: "Could not detect",
+        confidence: 0
+      });
+    }
+
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+
 });
 
+
+/* =========================
+   🚀 START SERVER
+========================= */
 app.listen(3000, () => {
   console.log("Server running on port 3000");
 });
