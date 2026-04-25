@@ -1,3 +1,44 @@
+const express = require("express");
+const multer = require("multer");
+const cors = require("cors");
+const fetch = require("node-fetch");
+const FormData = require("form-data");
+
+const app = express();
+const upload = multer();
+
+app.use(cors());
+
+/* =========================
+   🌿 PlantNet API (Plant ID)
+========================= */
+app.post("/identify", upload.single("image"), async (req, res) => {
+
+  const form = new FormData();
+  form.append("images", req.file.buffer, "plant.jpg");
+
+  try {
+    const response = await fetch(
+      "https://my-api.plantnet.org/v2/identify/all?api-key=2b104s5nNyqRjHHyiCJveuBwu",
+      {
+        method: "POST",
+        body: form
+      }
+    );
+
+    const data = await response.json();
+    res.json(data);
+
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+
+});
+
+
+/* =========================
+   🦠 Disease Detection (AI FIXED)
+========================= */
 app.post("/detect-disease", upload.single("image"), async (req, res) => {
 
   try {
@@ -17,58 +58,49 @@ app.post("/detect-disease", upload.single("image"), async (req, res) => {
 
     const data = await response.json();
 
-    console.log("HF RESPONSE:", data);
+    console.log("HF RAW:", data);
 
     // ===============================
-    // CASE 1: valid array response
+    // ❌ MODEL STILL LOADING
+    // ===============================
+    if (!data || data.error) {
+      return res.json({
+        result: "⏳ Model is loading, try again",
+        confidence: 0
+      });
+    }
+
+    // ===============================
+    // ARRAY RESPONSE (NORMAL)
     // ===============================
     if (Array.isArray(data) && data.length > 0) {
 
       const best = data[0];
-      const label = best.label;
-      const score = best.score;
 
-      // 🌱 HEALTHY CHECK (important fix)
-      const isHealthy =
-        label.toLowerCase().includes("healthy") ||
-        label.toLowerCase().includes("no disease") ||
-        score < 0.5;
-
-      if (isHealthy) {
+      if (!best.label || !best.score) {
         return res.json({
-          result: "🌱 Healthy plant (No disease detected)",
-          confidence: score || 0
+          result: "⚠️ No disease detected",
+          confidence: 0
         });
       }
 
-      return res.json({
-        result: label,
-        confidence: score
-      });
-    }
-
-    // ===============================
-    // CASE 2: object response
-    // ===============================
-    if (data && data.label) {
-
       const isHealthy =
-        data.label.toLowerCase().includes("healthy") ||
-        data.score < 0.5;
+        best.label.toLowerCase().includes("healthy") ||
+        best.score < 0.5;
 
       return res.json({
         result: isHealthy
           ? "🌱 Healthy plant (No disease detected)"
-          : data.label,
-        confidence: data.score || 0
+          : best.label,
+        confidence: best.score
       });
     }
 
     // ===============================
-    // CASE 3: nothing returned
+    // EMPTY RESPONSE
     // ===============================
     return res.json({
-      result: "⚠️ Could not determine disease (try again)",
+      result: "⚠️ No disease detected",
       confidence: 0
     });
 
@@ -76,4 +108,12 @@ app.post("/detect-disease", upload.single("image"), async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 
+});
+
+
+/* =========================
+   🚀 START SERVER
+========================= */
+app.listen(3000, () => {
+  console.log("Server running on port 3000");
 });
