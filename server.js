@@ -37,7 +37,7 @@ app.post("/identify", upload.single("image"), async (req, res) => {
 
 
 /* =========================
-   🦠 Disease Detection (AI)
+   🦠 Disease Detection (AI FIXED)
 ========================= */
 app.post("/detect-disease", upload.single("image"), async (req, res) => {
 
@@ -60,17 +60,14 @@ app.post("/detect-disease", upload.single("image"), async (req, res) => {
 
     console.log("HF Response:", data);
 
-    if (Array.isArray(data) && data.length > 0) {
-      res.json({
-        result: data[0].label,
-        confidence: data[0].score
-      });
-    } else {
-      res.json({
-        result: "Could not detect",
-        confidence: 0
-      });
-    }
+    // ✅ FIX: correct parsing for Hugging Face response
+    const label = data?.[0]?.label;
+    const score = data?.[0]?.score;
+
+    res.json({
+      result: label || "Could not detect",
+      confidence: score || 0
+    });
 
   } catch (err) {
     res.status(500).json({ error: err.message });
