@@ -58,50 +58,52 @@ app.post("/detect-disease", upload.single("image"), async (req, res) => {
 
     const data = await response.json();
 
-    console.log("HF RAW:", data);
+    console.log("HF RAW RESPONSE:", data);
 
-    // ===============================
+    // =========================
     // ❌ MODEL STILL LOADING
-    // ===============================
-    if (!data || data.error) {
+    // =========================
+    if (data?.error) {
       return res.json({
-        result: "⏳ Model is loading, try again",
+        result: "⏳ AI model is loading, try again",
         confidence: 0
       });
     }
 
-    // ===============================
-    // ARRAY RESPONSE (NORMAL)
-    // ===============================
-    if (Array.isArray(data) && data.length > 0) {
-
-      const best = data[0];
-
-      if (!best.label || !best.score) {
-        return res.json({
-          result: "⚠️ No disease detected",
-          confidence: 0
-        });
-      }
-
-      const isHealthy =
-        best.label.toLowerCase().includes("healthy") ||
-        best.score < 0.5;
-
+    // =========================
+    // ❌ EMPTY RESPONSE
+    // =========================
+    if (!Array.isArray(data) || data.length === 0) {
       return res.json({
-        result: isHealthy
-          ? "🌱 Healthy plant (No disease detected)"
-          : best.label,
-        confidence: best.score
+        result: "⚠️ No disease detected (uncertain image)",
+        confidence: 0
       });
     }
 
-    // ===============================
-    // EMPTY RESPONSE
-    // ===============================
+    const top = data[0];
+
+    if (!top?.label || !top?.score) {
+      return res.json({
+        result: "⚠️ Unable to analyze plant",
+        confidence: 0
+      });
+    }
+
+    // =========================
+    // 🌱 HEALTHY DETECTION
+    // =========================
+    const label = top.label.toLowerCase();
+
+    const isHealthy =
+      label.includes("healthy") ||
+      label.includes("no disease") ||
+      top.score < 0.55;
+
     return res.json({
-      result: "⚠️ No disease detected",
-      confidence: 0
+      result: isHealthy
+        ? "🌱 Healthy plant (No disease detected)"
+        : top.label,
+      confidence: top.score
     });
 
   } catch (err) {
