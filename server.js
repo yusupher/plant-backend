@@ -4,13 +4,14 @@ const cors = require("cors");
 const fetch = require("node-fetch");
 const FormData = require("form-data");
 
-const app = express();
+const app = express(); // ✅ MUST BE FIRST
 const upload = multer();
 
 app.use(cors());
+app.use(express.json());
 
 /* =========================
-   🌿 PlantNet API (Plant ID)
+   🌿 PlantNet API
 ========================= */
 app.post("/identify", upload.single("image"), async (req, res) => {
 
@@ -32,12 +33,11 @@ app.post("/identify", upload.single("image"), async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
-
 });
 
 
 /* =========================
-   🦠 Disease Detection (AI FIXED)
+   🦠 Disease Detection
 ========================= */
 app.post("/detect-disease", upload.single("image"), async (req, res) => {
 
@@ -58,52 +58,18 @@ app.post("/detect-disease", upload.single("image"), async (req, res) => {
 
     const data = await response.json();
 
-    console.log("HF RAW RESPONSE:", data);
+    console.log("HF RESPONSE:", data);
 
-    // =========================
-    // ❌ MODEL STILL LOADING
-    // =========================
-    if (data?.error) {
+    if (Array.isArray(data) && data.length > 0) {
       return res.json({
-        result: "⏳ AI model is loading, try again",
-        confidence: 0
+        result: data[0].label,
+        confidence: data[0].score
       });
     }
-
-    // =========================
-    // ❌ EMPTY RESPONSE
-    // =========================
-    if (!Array.isArray(data) || data.length === 0) {
-      return res.json({
-        result: "⚠️ No disease detected (uncertain image)",
-        confidence: 0
-      });
-    }
-
-    const top = data[0];
-
-    if (!top?.label || !top?.score) {
-      return res.json({
-        result: "⚠️ Unable to analyze plant",
-        confidence: 0
-      });
-    }
-
-    // =========================
-    // 🌱 HEALTHY DETECTION
-    // =========================
-    const label = top.label.toLowerCase();
-
-    const isHealthy =
-      label.includes("healthy") ||
-      label.includes("no disease") ||
-      top.score < 0.55;
 
     return res.json({
-      result: isHealthy
-        ? "🌱 Healthy plant (No disease detected)"
-        : top.label,
-      confidence: top.score
+      result: "No disease detected",
+      confidence: 0
     });
 
   } catch (err) {
@@ -116,6 +82,8 @@ app.post("/detect-disease", upload.single("image"), async (req, res) => {
 /* =========================
    🚀 START SERVER
 ========================= */
-app.listen(3000, () => {
-  console.log("Server running on port 3000");
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+  console.log("Server running on port", PORT);
 });
