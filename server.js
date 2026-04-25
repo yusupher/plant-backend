@@ -43,6 +43,9 @@ app.post("/detect-disease", upload.single("image"), async (req, res) => {
 
   try {
 
+    // =========================
+    // CHECK FILE FIRST
+    // =========================
     if (!req.file) {
       return res.status(400).json({
         result: "No image uploaded",
@@ -52,6 +55,9 @@ app.post("/detect-disease", upload.single("image"), async (req, res) => {
 
     const imageBuffer = req.file.buffer;
 
+    // =========================
+    // CALL AI MODEL
+    // =========================
     const response = await fetch(
       "https://api-inference.huggingface.co/models/plantdoc/plant-disease-classifier",
       {
@@ -68,7 +74,20 @@ app.post("/detect-disease", upload.single("image"), async (req, res) => {
 
     console.log("HF RESPONSE:", data);
 
-    if (!Array.isArray(data) || data.length === 0 || data.error) {
+    // =========================
+    // HANDLE ERROR FROM HF
+    // =========================
+    if (!data || data.error) {
+      return res.json({
+        result: "AI model loading or error",
+        confidence: 0
+      });
+    }
+
+    // =========================
+    // HANDLE EMPTY RESULT
+    // =========================
+    if (!Array.isArray(data) || data.length === 0) {
       return res.json({
         result: "No disease detected",
         confidence: 0
@@ -83,10 +102,13 @@ app.post("/detect-disease", upload.single("image"), async (req, res) => {
     });
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({
+
+    console.error("CRASH ERROR:", err);
+
+    return res.status(500).json({
       error: "Server crashed: " + err.message
     });
+
   }
 
 });
