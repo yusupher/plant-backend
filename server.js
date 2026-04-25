@@ -4,14 +4,13 @@ const cors = require("cors");
 const fetch = require("node-fetch");
 const FormData = require("form-data");
 
-const app = express(); // ✅ MUST BE FIRST
+const app = express();
 const upload = multer();
 
 app.use(cors());
-app.use(express.json());
 
 /* =========================
-   🌿 PlantNet API
+   🌿 PLANT IDENTIFICATION
 ========================= */
 app.post("/identify", upload.single("image"), async (req, res) => {
 
@@ -33,21 +32,19 @@ app.post("/identify", upload.single("image"), async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+
 });
 
 
 /* =========================
-   🦠 Disease Detection
+   🦠 DISEASE DETECTION (FIXED)
 ========================= */
 app.post("/detect-disease", upload.single("image"), async (req, res) => {
 
   try {
 
-    // =========================
-    // CHECK FILE FIRST
-    // =========================
     if (!req.file) {
-      return res.status(400).json({
+      return res.json({
         result: "No image uploaded",
         confidence: 0
       });
@@ -55,11 +52,8 @@ app.post("/detect-disease", upload.single("image"), async (req, res) => {
 
     const imageBuffer = req.file.buffer;
 
-    // =========================
-    // CALL AI MODEL
-    // =========================
     const response = await fetch(
-      "https://api-inference.huggingface.co/models/plantdoc/plant-disease-classifier",
+      "https://api-inference.huggingface.co/models/nateraw/plant-disease-classification",
       {
         method: "POST",
         headers: {
@@ -70,24 +64,27 @@ app.post("/detect-disease", upload.single("image"), async (req, res) => {
       }
     );
 
-    const data = await response.json();
+    // 🔥 FIX: prevent JSON crash (HTML response issue)
+    const text = await response.text();
 
-    console.log("HF RESPONSE:", data);
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (err) {
+      console.log("RAW HF RESPONSE:", text);
 
-    // =========================
-    // HANDLE ERROR FROM HF
-    // =========================
-    if (!data || data.error) {
       return res.json({
-        result: "AI model loading or error",
+        result: "AI model error or loading",
         confidence: 0
       });
     }
 
+    console.log("HF RESPONSE:", data);
+
     // =========================
-    // HANDLE EMPTY RESULT
+    // HANDLE ERROR RESPONSE
     // =========================
-    if (!Array.isArray(data) || data.length === 0) {
+    if (!Array.isArray(data) || data.length === 0 || data.error) {
       return res.json({
         result: "No disease detected",
         confidence: 0
@@ -96,22 +93,29 @@ app.post("/detect-disease", upload.single("image"), async (req, res) => {
 
     const top = data[0];
 
+    const label = (top.label || "").toLowerCase();
+
+    const isHealthy =
+      label.includes("healthy") ||
+      top.score < 0.55;
+
     return res.json({
-      result: top.label || "Unknown",
+      result: isHealthy
+        ? "🌱 Healthy plant (No disease detected)"
+        : top.label,
       confidence: top.score || 0
     });
 
   } catch (err) {
+    console.error("SERVER ERROR:", err);
 
-    console.error("CRASH ERROR:", err);
-
-    return res.status(500).json({
-      error: "Server crashed: " + err.message
+    res.status(500).json({
+      error: err.message
     });
-
   }
 
 });
+
 
 /* =========================
    🚀 START SERVER
@@ -119,5 +123,5 @@ app.post("/detect-disease", upload.single("image"), async (req, res) => {
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log("Server running on port", PORT);
+  console.log("Server running on port " + PORT);
 });
