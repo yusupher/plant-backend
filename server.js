@@ -45,7 +45,7 @@ app.post("/detect-disease", upload.single("image"), async (req, res) => {
     const imageBuffer = req.file.buffer;
 
     const response = await fetch(
-      "https://api-inference.huggingface.co/models/nateraw/plant-disease-classification",
+      "https://api-inference.huggingface.co/models/linkingpark/plant-disease-detection",
       {
         method: "POST",
         headers: {
@@ -60,16 +60,42 @@ app.post("/detect-disease", upload.single("image"), async (req, res) => {
 
     console.log("HF RESPONSE:", data);
 
-    if (Array.isArray(data) && data.length > 0) {
+    // =========================
+    // ❌ MODEL ERROR / LOADING
+    // =========================
+    if (!data || data.error) {
       return res.json({
-        result: data[0].label,
-        confidence: data[0].score
+        result: "⏳ AI model loading, try again",
+        confidence: 0
       });
     }
 
+    // =========================
+    // ❌ EMPTY RESPONSE
+    // =========================
+    if (!Array.isArray(data) || data.length === 0) {
+      return res.json({
+        result: "⚠️ No disease detected",
+        confidence: 0
+      });
+    }
+
+    const top = data[0];
+
+    // =========================
+    // 🌱 HEALTH CHECK
+    // =========================
+    const label = top.label.toLowerCase();
+
+    const isHealthy =
+      label.includes("healthy") ||
+      top.score < 0.55;
+
     return res.json({
-      result: "No disease detected",
-      confidence: 0
+      result: isHealthy
+        ? "🌱 Healthy plant (No disease detected)"
+        : top.label,
+      confidence: top.score
     });
 
   } catch (err) {
