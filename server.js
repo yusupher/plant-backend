@@ -32,6 +32,24 @@ app.post("/identify", upload.single("image"), async (req, res) => {
   }
 
 });
+app.post("/detect-disease", (req, res) => {
+
+  const diseases = [
+    "🌽 Maize Rust",
+    "🍂 Leaf Blight",
+    "🌱 Healthy Plant",
+    "🍄 Fungal Infection",
+    "⚠️ Bacterial Spot"
+  ];
+
+  const result = diseases[Math.floor(Math.random() * diseases.length)];
+
+  res.json({
+    success: true,
+    result: result,
+    advice: "Check leaves, remove infected parts, improve soil moisture"
+  });
+});
 
 app.listen(3000, () => {
   console.log("Server running on port 3000");
