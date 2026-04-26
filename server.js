@@ -16,11 +16,10 @@ app.use(express.json());
 const WEATHER_KEY = process.env.WEATHER_KEY;
 const PLANTNET_KEY = process.env.PLANTNET_KEY;
 const ROBOFLOW_KEY = process.env.ROBOFLOW_API_KEY;
-const PLANT_ID_KEY = process.env.PLANT_ID_KEY;
 
 /* ================= ROOT ================= */
 app.get("/", (req, res) => {
-  res.send("🌾 Smart Farm API Running");
+  res.send("🌾 Smart Farm AI FULL SYSTEM Running");
 });
 
 /* ================= WEATHER ================= */
@@ -28,14 +27,8 @@ app.get("/weather", async (req, res) => {
   try {
     const { lat, lon, city } = req.query;
 
-    if (!WEATHER_KEY) {
-      return res.json({
-        error: "Missing WEATHER_KEY",
-        temp: 0,
-        rain: 0,
-        desc: "no api key",
-        location: city || "unknown"
-      });
+    if (!city && (!lat || !lon)) {
+      return res.status(400).json({ error: "Missing location" });
     }
 
     const url = city
@@ -46,25 +39,22 @@ app.get("/weather", async (req, res) => {
     const data = await r.json();
 
     if (!r.ok) {
-      return res.status(400).json({
-        error: "Invalid weather response",
-        detail: data.message || "weather failed"
-      });
+      return res.status(400).json({ error: data.message });
     }
 
     res.json({
-      temp: data.main?.temp ?? 0,
-      rain: data.rain?.["1h"] ?? 0,
-      desc: data.weather?.[0]?.description ?? "unknown",
-      location: data.name ?? city ?? "unknown"
+      temp: data.main?.temp,
+      rain: data.rain?.["1h"] || 0,
+      desc: data.weather?.[0]?.description,
+      location: data.name
     });
 
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
-/* ================= SOIL (ISRIC) ================= */
+/* ================= SOIL ================= */
 app.get("/soil", async (req, res) => {
   try {
     const { lat, lon } = req.query;
@@ -78,8 +68,7 @@ app.get("/soil", async (req, res) => {
     }
 
     const url =
-      `https://rest.isric.org/soilgrids/v2.0/properties/query?` +
-      `lon=${lon}&lat=${lat}&property=phh2o&depth=0-5cm&value=mean`;
+      `https://rest.isric.org/soilgrids/v2.0/properties/query?lon=${lon}&lat=${lat}&property=phh2o&depth=0-5cm&value=mean`;
 
     const r = await fetch(url);
     const data = await r.json();
@@ -88,95 +77,166 @@ app.get("/soil", async (req, res) => {
       data?.properties?.layers?.[0]?.depths?.[0]?.values?.mean;
 
     res.json({
-      ph: ph ?? 6.2,
-      source: ph ? "live" : "fallback",
-      note: ph ? "real data" : "estimated safe default"
+      ph: ph || 6.2,
+      source: ph ? "live" : "fallback"
     });
 
-  } catch (err) {
-    res.json({
-      ph: 6.2,
-      source: "fallback",
-      note: "error fallback"
-    });
+  } catch {
+    res.json({ ph: 6.2, source: "fallback" });
   }
 });
 
-/* ================= SMART CROP ENGINE ================= */
-function scoreCrop(crop, env) {
-  let score = 0;
+/* ================= CORE AI FUNCTIONS ================= */
 
-  // temperature match
-  if (env.temp >= crop.temp[0] && env.temp <= crop.temp[1]) score += 3;
+function scoreCrop(c, e) {
+  let s = 0;
 
-  // rainfall match
-  if (env.rain >= crop.rain[0] && env.rain <= crop.rain[1]) score += 3;
+  if (e.temp >= c.temp[0] && e.temp <= c.temp[1]) s += 3;
+  if (e.rain >= c.rain[0] && e.rain <= c.rain[1]) s += 3;
+  if (e.soilPh >= c.ph[0] && e.soilPh <= c.ph[1]) s += 2;
 
-  // soil pH match
-  if (env.soilPh >= crop.ph[0] && env.soilPh <= crop.ph[1]) score += 2;
+  if (c.zones.includes("All") || c.zones.includes(e.zone)) s += 3;
 
-  // zone match
-  if (
-    crop.zones?.includes("All") ||
-    crop.zones?.includes(env.zone)
-  ) {
-    score += 3;
-  }
+  s += c.pestResistanceScore || 0;
 
-  // pest resistance boost
-  score += crop.pestResistanceScore || 0;
+  if (e.drought && c.waterNeedScore <= 2) s += 2;
 
-  // water logic
-  if (env.drought && crop.waterNeedScore <= 2) score += 2;
-
-  return score;
+  return s;
 }
 
+function riskCheck(c, e) {
+  let r = [];
+
+  if (e.temp < c.temp[0] || e.temp > c.temp[1])
+    r.push("Temperature stress");
+
+  if (e.rain < c.rain[0])
+    r.push("Low rainfall risk");
+
+  if (e.soilPh < c.ph[0] || e.soilPh > c.ph[1])
+    r.push("Soil pH mismatch");
+
+  return r;
+}
+
+function label(score) {
+  if (score >= 12) return "⭐ BEST MATCH";
+  if (score >= 8) return "⭐ GOOD MATCH";
+  return "⚠ RISKY";
+}
+
+function profit(c, e) {
+  const base = c.yield || 5;
+  const price = 200000;
+  const boost = 1 + scoreCrop(c, e) / 20;
+  return Math.round(base * boost * price);
+}
+
+/* ================= AI CROP ENGINE ================= */
 app.post("/ai-crop", (req, res) => {
   try {
     const { temp, rain, soilPh, zone, drought } = req.body;
 
-    if (!temp || !rain || !soilPh) {
-      return res.status(400).json({
-        error: "Missing input values"
-      });
+    if (temp == null || rain == null || soilPh == null) {
+      return res.status(400).json({ error: "Missing inputs" });
     }
 
-    let filtered = crops;
+    const env = { temp, rain, soilPh, zone, drought };
+
+    let list = crops;
 
     if (zone) {
-      filtered = crops.filter(c =>
-        c.zones?.includes(zone) || c.zones?.includes("All")
+      list = crops.filter(c =>
+        c.zones.includes("All") || c.zones.includes(zone)
       );
     }
 
-    const scored = filtered.map(c => ({
-      name: c.name,
-      yield: c.yield,
-      fertilizer: c.fertilizer,
-      score: scoreCrop(c, {
-        temp,
-        rain,
-        soilPh,
-        zone,
-        drought
-      })
-    }));
+    const result = list.map(c => {
+      const score = scoreCrop(c, env);
 
-    scored.sort((a, b) => b.score - a.score);
-
-    res.json({
-      top: scored.slice(0, 5)
+      return {
+        name: c.name,
+        score,
+        label: label(score),
+        yield: c.yield,
+        fertilizer: c.fertilizer,
+        profit: profit(c, env),
+        risks: riskCheck(c, env),
+        explanation:
+          riskCheck(c, env).length === 0
+            ? "Ideal growing conditions"
+            : "Issues: " + riskCheck(c, env).join(", ")
+      };
     });
 
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+    result.sort((a, b) => b.score - a.score);
+
+    res.json({ top: result.slice(0, 5) });
+
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
-/* ================= START SERVER ================= */
-const PORT = process.env.PORT || 3000;
+/* ================= PLANT IDENTIFICATION ================= */
+app.post("/identify-plant", upload.single("image"), async (req, res) => {
+  try {
+    const form = new FormData();
+    form.append("images", req.file.buffer, {
+      filename: "plant.jpg",
+      contentType: "image/jpeg"
+    });
 
+    const r = await fetch(
+      `https://my-api.plantnet.org/v2/identify/all?api-key=${PLANTNET_KEY}`,
+      { method: "POST", body: form }
+    );
+
+    const data = await r.json();
+    const top = data?.results?.[0];
+
+    res.json({
+      plant:
+        top?.species?.commonNames?.[0] ||
+        top?.species?.scientificNameWithoutAuthor ||
+        "Unknown",
+      confidence: top?.score || 0
+    });
+
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/* ================= DISEASE ================= */
+app.post("/detect-disease", upload.single("image"), async (req, res) => {
+  try {
+    const base64 = req.file.buffer.toString("base64");
+
+    const r = await fetch(
+      `https://serverless.roboflow.com/plant-disease-xqd8b-tvz68/1?api_key=${ROBOFLOW_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: base64
+      }
+    );
+
+    const data = await r.json();
+    const top = data?.predictions?.[0];
+
+    res.json({
+      disease: top?.class || "Healthy",
+      confidence: Math.round((top?.confidence || 0) * 100)
+    });
+
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/* ================= START ================= */
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log("🚀 Smart Farm API running on port " + PORT);
+  console.log("🚀 Smart Farm AI FULL SYSTEM running on " + PORT);
 });
