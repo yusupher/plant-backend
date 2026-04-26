@@ -12,15 +12,15 @@ const upload = multer({ limits: { fileSize: 5 * 1024 * 1024 } });
 app.use(cors());
 app.use(express.json());
 
-/* ================= ENV KEYS ================= */
+/* ================= ENV ================= */
 const WEATHER_KEY = process.env.WEATHER_KEY;
 const PLANTNET_KEY = process.env.PLANTNET_KEY;
 const ROBOFLOW_KEY = process.env.ROBOFLOW_API_KEY;
-const PLANT_ID_KEY = process.env.PLANT_ID_KEY;
+const PLANT_ID_KEY = process.env.plant_id;
 
 /* ================= ROOT ================= */
 app.get("/", (req, res) => {
-  res.send("🌾 SMART FARM AI FULL SYSTEM RUNNING 🚀");
+  res.send("🌾 Smart Farm AI FULL SYSTEM ACTIVE");
 });
 
 /* ================= WEATHER ================= */
@@ -37,19 +37,16 @@ app.get("/weather", async (req, res) => {
       : `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${WEATHER_KEY}&units=metric`;
 
     const r = await fetch(url);
-    const data = await r.json();
+    const d = await r.json();
 
-    if (!r.ok) {
-      return res.status(400).json({ error: data.message });
-    }
+    if (!r.ok) return res.status(400).json(d);
 
     res.json({
-      temp: data.main?.temp || 0,
-      rain: data.rain?.["1h"] || 0,
-      desc: data.weather?.[0]?.description || "unknown",
-      location: data.name || city
+      temp: d.main.temp,
+      rain: d.rain?.["1h"] || 0,
+      desc: d.weather[0].description,
+      location: d.name
     });
-
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -68,14 +65,13 @@ app.get("/soil", async (req, res) => {
       });
     }
 
-    const url =
-      `https://rest.isric.org/soilgrids/v2.0/properties/query?lon=${lon}&lat=${lat}&property=phh2o&depth=0-5cm&value=mean`;
+    const url = `https://rest.isric.org/soilgrids/v2.0/properties/query?lon=${lon}&lat=${lat}&property=phh2o&depth=0-5cm&value=mean`;
 
     const r = await fetch(url);
-    const data = await r.json();
+    const d = await r.json();
 
     const ph =
-      data?.properties?.layers?.[0]?.depths?.[0]?.values?.mean;
+      d?.properties?.layers?.[0]?.depths?.[0]?.values?.mean;
 
     res.json({
       ph: ph || 6.2,
@@ -87,7 +83,8 @@ app.get("/soil", async (req, res) => {
   }
 });
 
-/* ================= CORE AI ================= */
+/* ================= AI ENGINE ================= */
+
 function scoreCrop(c, e) {
   let s = 0;
 
@@ -104,194 +101,163 @@ function scoreCrop(c, e) {
   return s;
 }
 
-function risk(c, e) {
-  let r = [];
-
-  if (e.temp < c.temp[0] || e.temp > c.temp[1])
-    r.push("Temperature stress");
-
-  if (e.rain < c.rain[0])
-    r.push("Low rainfall");
-
-  if (e.soilPh < c.ph[0] || e.soilPh > c.ph[1])
-    r.push("Soil mismatch");
-
-  return r;
-}
-
 function label(score) {
   if (score >= 12) return "⭐ BEST MATCH";
   if (score >= 8) return "⭐ GOOD MATCH";
   return "⚠ RISKY";
 }
 
-function fertilizer(c) {
-  return c.fertilizer || "NPK (general)";
-}
-
-function profit(c, e) {
-  const base = c.yield || 5;
-  const price = 200000;
-  return Math.round(base * (1 + scoreCrop(c, e) / 20) * price);
-}
-
 /* ================= AI CROP ================= */
 app.post("/ai-crop", (req, res) => {
-  try {
-    const { temp, rain, soilPh, zone, drought } = req.body;
+  const { temp, rain, soilPh, zone, drought } = req.body;
 
-    const env = { temp, rain, soilPh, zone, drought };
-
-    let list = crops;
-
-    if (zone) {
-      list = crops.filter(c =>
-        c.zones.includes("All") || c.zones.includes(zone)
-      );
-    }
-
-    const result = list.map(c => {
-      const score = scoreCrop(c, env);
-
-      return {
-        name: c.name,
-        score,
-        label: label(score),
-        yield: c.yield,
-        fertilizer: fertilizer(c),
-        profit: profit(c, env),
-        risks: risk(c, env),
-        explanation:
-          risk(c, env).length ? risk(c, env).join(", ") : "Ideal conditions"
-      };
-    });
-
-    result.sort((a, b) => b.score - a.score);
-
-    res.json({ top: result.slice(0, 5) });
-
-  } catch (e) {
-    res.status(500).json({ error: e.message });
+  if (temp == null || rain == null || soilPh == null) {
+    return res.status(400).json({ error: "Missing inputs" });
   }
+
+  const env = { temp, rain, soilPh, zone, drought };
+
+  const result = crops.map(c => {
+    const score = scoreCrop(c, env);
+
+    return {
+      name: c.name,
+      score,
+      label: label(score),
+      yield: c.yield,
+      fertilizer: c.fertilizer,
+      fertilizerType: c.fertilizerType,
+      profitPerHa: Math.round(c.yield * 120000 * (1 + score / 20)),
+      risk: score < 8 ? "High Risk" : "Low Risk",
+      explanation:
+        score < 8
+          ? "Crop not ideal for current conditions"
+          : "Good farming conditions"
+    };
+  });
+
+  result.sort((a, b) => b.score - a.score);
+
+  res.json({ top: result.slice(0, 5) });
 });
 
-/* ================= PLANT IDENTIFICATION ================= */
-app.post("/identify-plant", upload.single("image"), async (req, res) => {
-  try {
-    const form = new FormData();
-    form.append("images", req.file.buffer, {
-      filename: "plant.jpg",
-      contentType: "image/jpeg"
-    });
+/* ================= FERTILIZER CALCULATOR ================= */
+app.post("/fertilizer", (req, res) => {
+  const { cropName, areaHa } = req.body;
 
-    const r = await fetch(
-      `https://my-api.plantnet.org/v2/identify/all?api-key=${PLANTNET_KEY}`,
-      { method: "POST", body: form }
-    );
+  const crop = crops.find(c => c.name === cropName);
 
-    const data = await r.json();
-    const top = data?.results?.[0];
+  if (!crop) return res.status(404).json({ error: "Crop not found" });
 
-    res.json({
-      plant: top?.species?.commonNames?.[0] ||
-        top?.species?.scientificNameWithoutAuthor ||
-        "Unknown",
-      confidence: top?.score || 0
-    });
-
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+  res.json({
+    crop: crop.name,
+    recommendation: crop.fertilizer,
+    area: areaHa,
+    estimatedUsageKg: areaHa * 200
+  });
 });
 
-/* ================= PLANT HEALTH ================= */
-app.post("/plant-health", upload.single("image"), async (req, res) => {
-  try {
-    const base64 = req.file.buffer.toString("base64");
+/* ================= PROFIT ================= */
+app.post("/profit", (req, res) => {
+  const { cropName, areaHa } = req.body;
 
-    const r = await fetch("https://api.plant.id/v2/identify", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Api-Key": PLANT_ID_KEY
-      },
-      body: JSON.stringify({
-        images: [`data:image/jpeg;base64,${base64}`],
-        modifiers: ["health_all"]
-      })
-    });
+  const crop = crops.find(c => c.name === cropName);
 
-    const data = await r.json();
-    const top = data?.suggestions?.[0];
+  if (!crop) return res.status(404).json({ error: "Crop not found" });
 
-    res.json({
-      health: Math.round((top?.health?.probability || 0) * 100),
-      status: top?.health?.probability > 0.6 ? "Healthy" : "Unhealthy"
-    });
+  const revenue = crop.yield * 120000 * areaHa;
 
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+  res.json({
+    crop: crop.name,
+    areaHa,
+    estimatedProfit: Math.round(revenue)
+  });
 });
 
-/* ================= DISEASE ================= */
-app.post("/detect-disease", upload.single("image"), async (req, res) => {
-  try {
-    const base64 = req.file.buffer.toString("base64");
+/* ================= PLANT CALENDAR ================= */
+app.get("/calendar", (req, res) => {
+  const { state } = req.query;
 
-    const r = await fetch(
-      `https://serverless.roboflow.com/plant-disease-xqd8b-tvz68/1?api_key=${ROBOFLOW_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: base64
-      }
-    );
+  const zones = {
+    "Lagos": "South",
+    "Kano": "North",
+    "Oyo": "South",
+    "Kaduna": "North"
+  };
 
-    const data = await r.json();
-    const top = data?.predictions?.[0];
+  const zone = zones[state] || "South";
 
-    res.json({
-      disease: top?.class || "Healthy",
-      confidence: Math.round((top?.confidence || 0) * 100)
-    });
-
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+  res.json({
+    state,
+    zone,
+    planting: zone === "North"
+      ? ["May", "June", "July"]
+      : ["March", "April", "September"]
+  });
 });
 
-/* ================= AI CHAT ================= */
-app.post("/ai-chat", (req, res) => {
-  const { message } = req.body;
-
-  let reply = "Ask about crops, soil, fertilizer or pests.";
-
-  if (message?.toLowerCase().includes("plant"))
-    reply = "Best planting depends on rainfall and zone.";
-
-  if (message?.toLowerCase().includes("fertilizer"))
-    reply = "Use NPK based on crop type.";
-
-  if (message?.toLowerCase().includes("disease"))
-    reply = "Check leaf color and apply pesticide if needed.";
-
-  res.json({ reply });
-});
-
-/* ================= VOICE ================= */
+/* ================= VOICE ASSISTANT ================= */
 app.post("/voice", (req, res) => {
-  const { lang, text } = req.body;
+  const { crop, lang } = req.body;
 
-  let speech = text;
+  const messages = {
+    yoruba: `Igbinrere: ${crop} dara fun oko yi. Rii daju fertiliza to to.`,
+    igbo: `Nduzi: ${crop} dị mma maka ala a. jiri fatịlaiza kwesịrị ekwesị.`,
+    hausa: `Shawarwari: ${crop} ya dace da wannan ƙasa. yi amfani da taki mai kyau.`
+  };
 
-  if (lang === "yoruba") speech = "E kaaro. " + text;
-  if (lang === "igbo") speech = "Ndewo. " + text;
-  if (lang === "hausa") speech = "Sannu. " + text;
+  res.json({
+    text: messages[lang] || messages.yoruba
+  });
+});
 
-  res.json({ speech, lang });
+/* ================= PLANTNET ================= */
+app.post("/identify-plant", upload.single("image"), async (req, res) => {
+  const form = new FormData();
+  form.append("images", req.file.buffer, { filename: "plant.jpg" });
+
+  const r = await fetch(
+    `https://my-api.plantnet.org/v2/identify/all?api-key=${PLANTNET_KEY}`,
+    { method: "POST", body: form }
+  );
+
+  const d = await r.json();
+  const top = d.results?.[0];
+
+  res.json({
+    plant:
+      top?.species?.commonNames?.[0] ||
+      top?.species?.scientificNameWithoutAuthor,
+    confidence: top?.score
+  });
+});
+
+/* ================= PLANT ID ================= */
+app.post("/plant-health", async (req, res) => {
+  const { image } = req.body;
+
+  const r = await fetch("https://api.plant.id/v2/identify", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Api-Key": PLANT_ID_KEY
+    },
+    body: JSON.stringify({
+      images: [image],
+      modifiers: ["health_all"]
+    })
+  });
+
+  const d = await r.json();
+
+  res.json({
+    health: d?.suggestions?.[0]?.health?.probability || 0
+  });
 });
 
 /* ================= START ================= */
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("🚀 FULL SMART FARM RUNNING ON " + PORT));
+
+app.listen(PORT, () => {
+  console.log("🚀 Smart Farm FULL AI running on " + PORT);
+});
