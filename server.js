@@ -8,13 +8,22 @@ const app = express();
 const upload = multer();
 
 app.use(cors());
+app.use(express.json());
 
 /* =========================
-   🌿 PLANT IDENTIFICATION (WORKING)
+   🌿 PLANT IDENTIFICATION (PlantNet)
 ========================= */
 app.post("/identify", upload.single("image"), async (req, res) => {
 
   try {
+
+    if (!req.file) {
+      return res.json({
+        result: "No image uploaded",
+        confidence: 0
+      });
+    }
+
     const form = new FormData();
     form.append("images", req.file.buffer, "plant.jpg");
 
@@ -27,17 +36,19 @@ app.post("/identify", upload.single("image"), async (req, res) => {
     );
 
     const data = await response.json();
-    res.json(data);
+
+    return res.json(data);
 
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("PlantNet Error:", err);
+    return res.status(500).json({ error: err.message });
   }
 
 });
 
 
 /* =========================
-   🦠 DISEASE DETECTION (FIXED + STABLE)
+   🦠 DISEASE DETECTION (ROBOFLOW - FIXED)
 ========================= */
 app.post("/detect-disease", upload.single("image"), async (req, res) => {
 
@@ -50,75 +61,42 @@ app.post("/detect-disease", upload.single("image"), async (req, res) => {
       });
     }
 
-    const imageBuffer = req.file.buffer;
+    const apiKey = "33LnNNZCWrWy3FQGulD9"; // 🔴 PUT YOUR KEY HERE
 
-    /* =========================
-       🔥 FIXED HUGGING FACE CALL
-    ========================= */
-    const response = await fetch(
-      "https://api-inference.huggingface.co/models/nateraw/plant-disease-classification",
-      {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${process.env.HF_TOKEN}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          inputs: imageBuffer.toString("base64")
-        })
-      }
-    );
+    const base64 = req.file.buffer.toString("base64");
 
-    /* =========================
-       ⚠️ SAFE TEXT HANDLING
-    ========================= */
-    const text = await response.text();
+    const url = `https://serverless.roboflow.com/plant-disease-xqd8b-tvz68/1?api_key=${apiKey}`;
 
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch (err) {
-      console.log("RAW HF RESPONSE:", text);
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: base64
+    });
+
+    const data = await response.json();
+
+    console.log("ROBOFLOW RESPONSE:", data);
+
+    if (data.predictions && data.predictions.length > 0) {
+
+      const top = data.predictions[0];
 
       return res.json({
-        result: "AI model error (invalid response)",
-        confidence: 0
+        result: top.class,
+        confidence: top.confidence
       });
+
     }
-
-    console.log("HF RESPONSE:", data);
-
-    /* =========================
-       ❌ EMPTY RESULT HANDLING
-    ========================= */
-    if (!Array.isArray(data) || data.length === 0) {
-      return res.json({
-        result: "🌱 Healthy plant (no disease detected)",
-        confidence: 0.7
-      });
-    }
-
-    const top = data[0];
-
-    const label = (top.label || "").toLowerCase();
-    const score = top.score || 0;
-
-    /* =========================
-       🌱 SMART HEALTH CHECK
-    ========================= */
-    const isHealthy =
-      label.includes("healthy") ||
-      score < 0.55;
 
     return res.json({
-      result: isHealthy
-        ? "🌱 Healthy plant"
-        : top.label,
-      confidence: score
+      result: "🌱 Healthy plant (no disease detected)",
+      confidence: 0
     });
 
   } catch (err) {
-    console.error("SERVER ERROR:", err);
+    console.error("Disease Error:", err);
 
     return res.status(500).json({
       error: err.message
@@ -129,7 +107,7 @@ app.post("/detect-disease", upload.single("image"), async (req, res) => {
 
 
 /* =========================
-   🚀 START SERVER
+   🚀 START SERVER (RENDER READY)
 ========================= */
 const PORT = process.env.PORT || 3000;
 
