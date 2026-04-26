@@ -17,40 +17,50 @@ const PLANTNET_KEY = process.env.PLANTNET_KEY;
 const ROBOFLOW_KEY = process.env.ROBOFLOW_API_KEY;
 const PLANT_ID_KEY = process.env.PLANT_ID_KEY;
 
-/* ================= ROOT (Render FIX) ================= */
+/* ================= ROOT ================= */
 app.get("/", (req, res) => {
-  res.send("🌾 Smart Farm API Running");
+  res.json({ status: "🌾 Smart Farm API Running" });
 });
 
-/* ================= WEATHER ================= */
+/* ================= WEATHER (FIXED) ================= */
 app.get("/weather", async (req, res) => {
   try {
     const { lat, lon, city } = req.query;
 
-    let url = city
+    if (!city && (!lat || !lon)) {
+      return res.status(400).json({
+        error: "Provide city OR lat & lon"
+      });
+    }
+
+    const url = city
       ? `https://api.openweathermap.org/data/2.5/weather?q=${city},NG&appid=${WEATHER_KEY}&units=metric`
       : `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${WEATHER_KEY}&units=metric`;
 
     const r = await fetch(url);
     const data = await r.json();
 
-    if (!data.main) {
-      return res.status(500).json({ error: "Invalid weather response" });
+    if (!data || data.cod !== 200) {
+      return res.status(400).json({
+        error: "Invalid weather response",
+        detail: data.message || "unknown error"
+      });
     }
 
     res.json({
-      temp: data.main.temp,
+      temp: data.main?.temp,
+      humidity: data.main?.humidity,
       rain: data.rain?.["1h"] || 0,
       desc: data.weather?.[0]?.description,
       location: data.name
     });
 
   } catch (e) {
-    res.status(500).json({ error: "weather failed", detail: e.message });
+    res.status(500).json({ error: e.message });
   }
 });
 
-/* ================= SOIL ================= */
+/* ================= SOIL (FIXED + FALLBACK) ================= */
 app.get("/soil", async (req, res) => {
   try {
     const { lat, lon } = req.query;
@@ -60,51 +70,63 @@ app.get("/soil", async (req, res) => {
     const r = await fetch(url);
     const data = await r.json();
 
-    res.json(data);
+    const ph =
+      data?.properties?.layers?.[0]?.depths?.[0]?.values?.mean;
+
+    let soilPh;
+
+    if (ph === null || ph === undefined) {
+      soilPh = 6.2; // fallback for West Africa soil average
+    } else {
+      soilPh = ph / 10;
+    }
+
+    res.json({
+      ph: soilPh,
+      source: ph ? "ISRIC" : "fallback",
+      note: ph ? "real data" : "estimated"
+    });
 
   } catch (e) {
-    res.status(500).json({ error: "soil failed", detail: e.message });
+    res.status(500).json({ error: e.message });
   }
 });
 
-/* ================= CROP SCORING ENGINE (FIXED) ================= */
+/* ================= SMART CROP ENGINE ================= */
 function scoreCrop(crop, env) {
   let score = 0;
 
-  const [tMin, tMax] = crop.temp;
-  const [rMin, rMax] = crop.rain;
-  const [pMin, pMax] = crop.ph;
+  if (env.temp >= crop.temp[0] && env.temp <= crop.temp[1]) score += 3;
+  if (env.rain >= crop.rain[0] && env.rain <= crop.rain[1]) score += 2;
+  if (env.ph >= crop.ph[0] && env.ph <= crop.ph[1]) score += 2;
 
-  if (env.temp >= tMin && env.temp <= tMax) score += 3;
-  if (env.rain >= rMin && env.rain <= rMax) score += 2;
-  if (env.soilPh >= pMin && env.soilPh <= pMax) score += 2;
-
-  if (env.drought && crop.waterNeedScore <= 2) score += 2;
-  if (env.pests && crop.pestResistanceScore >= 4) score += 2;
+  score += (crop.pestResistanceScore || 0);
+  score += (4 - (crop.waterNeedScore || 2));
 
   return score;
 }
 
-/* ================= AI CROP RECOMMENDATION ================= */
 app.post("/ai-crop", (req, res) => {
   try {
-    const { temp, rain, soilPh, drought, pests, zone } = req.body;
+    const { temp, rain, ph, zone } = req.body;
 
-    let filtered = crops;
+    let list = crops;
 
     if (zone) {
-      filtered = crops.filter(c => c.zones.includes(zone));
+      list = crops.filter(c =>
+        c.zones.includes(zone) || c.zones.includes("All")
+      );
     }
 
-    const scored = filtered.map(c => ({
+    const scored = list.map(c => ({
       ...c,
-      score: scoreCrop(c, { temp, rain, soilPh, drought, pests })
+      score: scoreCrop(c, { temp, rain, ph })
     }));
 
     scored.sort((a, b) => b.score - a.score);
 
     res.json({
-      top: scored.slice(0, 5),
+      best: scored.slice(0, 5),
       total: scored.length
     });
 
@@ -116,26 +138,15 @@ app.post("/ai-crop", (req, res) => {
 /* ================= PLANT IDENTIFICATION ================= */
 app.post("/identify-plant", upload.single("image"), async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ error: "No image uploaded" });
-    }
-
     const form = new FormData();
+    form.append("images", req.file.buffer, { filename: "plant.jpg" });
 
-    form.append("images", req.file.buffer, {
-      filename: "plant.jpg",
-      contentType: req.file.mimetype
-    });
-
-    const response = await fetch(
+    const r = await fetch(
       `https://my-api.plantnet.org/v2/identify/all?api-key=${PLANTNET_KEY}`,
-      {
-        method: "POST",
-        body: form
-      }
+      { method: "POST", body: form }
     );
 
-    const data = await response.json();
+    const data = await r.json();
     const top = data?.results?.[0];
 
     res.json({
@@ -151,12 +162,10 @@ app.post("/identify-plant", upload.single("image"), async (req, res) => {
   }
 });
 
-/* ================= DISEASE DETECTION ================= */
-app.post("/detect-disease", upload.single("image"), async (req, res) => {
+/* ================= DISEASE ================= */
+app.post("/detect-disease", async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ error: "No image uploaded" });
-
-    const base64 = req.file.buffer.toString("base64");
+    const base64 = req.body.image;
 
     const r = await fetch(
       `https://serverless.roboflow.com/plant-disease-xqd8b-tvz68/1?api_key=${ROBOFLOW_KEY}`,
@@ -180,12 +189,10 @@ app.post("/detect-disease", upload.single("image"), async (req, res) => {
   }
 });
 
-/* ================= PEST DETECTION ================= */
-app.post("/detect-pest", upload.single("image"), async (req, res) => {
+/* ================= PEST ================= */
+app.post("/detect-pest", async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ error: "No image uploaded" });
-
-    const base64 = req.file.buffer.toString("base64");
+    const base64 = req.body.image;
 
     const r = await fetch(
       `https://serverless.roboflow.com/insect-e746x-iuclt/1?api_key=${ROBOFLOW_KEY}`,
@@ -210,11 +217,9 @@ app.post("/detect-pest", upload.single("image"), async (req, res) => {
 });
 
 /* ================= PLANT HEALTH ================= */
-app.post("/plant-health", upload.single("image"), async (req, res) => {
+app.post("/plant-health", async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ error: "No image uploaded" });
-
-    const base64 = req.file.buffer.toString("base64");
+    const base64 = req.body.image;
 
     const r = await fetch("https://api.plant.id/v2/identify", {
       method: "POST",
@@ -243,6 +248,9 @@ app.post("/plant-health", upload.single("image"), async (req, res) => {
   }
 });
 
-/* ================= START SERVER ================= */
+/* ================= START ================= */
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("🚀 Backend running on port " + PORT));
+
+app.listen(PORT, () => {
+  console.log("🚀 Smart Farm API running on port " + PORT);
+});
