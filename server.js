@@ -1,3 +1,4 @@
+const express = require("express");
 const multer = require("multer");
 const cors = require("cors");
 const fetch = require("node-fetch");
@@ -10,17 +11,14 @@ app.use(cors());
 app.use(express.json());
 
 /* =========================
-   🌿 PLANT IDENTIFICATION (PlantNet)
+   🌿 PLANT IDENTIFICATION (ALWAYS FREE)
 ========================= */
 app.post("/identify", upload.single("image"), async (req, res) => {
 
   try {
 
     if (!req.file) {
-      return res.json({
-        result: "No image uploaded",
-        confidence: 0
-      });
+      return res.json({ result: "No image uploaded", confidence: 0 });
     }
 
     const form = new FormData();
@@ -39,7 +37,6 @@ app.post("/identify", upload.single("image"), async (req, res) => {
     return res.json(data);
 
   } catch (err) {
-    console.error("PlantNet Error:", err);
     return res.status(500).json({ error: err.message });
   }
 
@@ -47,17 +44,14 @@ app.post("/identify", upload.single("image"), async (req, res) => {
 
 
 /* =========================
-   🦠 DISEASE DETECTION (FIXED ROBUST)
+   🦠 DISEASE DETECTION (ROBUST + FALLBACK)
 ========================= */
 app.post("/detect-disease", upload.single("image"), async (req, res) => {
 
   try {
 
     if (!req.file) {
-      return res.json({
-        result: "No image uploaded",
-        confidence: 0
-      });
+      return res.json({ result: "No image uploaded", confidence: 0 });
     }
 
     const apiKey = "33LnNNZCWrWy3FQGulD9";
@@ -74,28 +68,36 @@ app.post("/detect-disease", upload.single("image"), async (req, res) => {
       body: base64
     });
 
-    const data = await response.json();
+    const text = await response.text();
 
-    console.log("DISEASE RESPONSE:", data);
+    let data;
 
-    /* =========================
-       ❌ NO DETECTION HANDLING
-    ========================= */
-    if (!data.predictions || data.predictions.length === 0) {
+    try {
+      data = JSON.parse(text);
+    } catch (err) {
+      console.log("RAW RESPONSE:", text);
+
       return res.json({
-        result: "🌱 Healthy plant (no disease detected)",
+        result: "AI service unavailable ⚠️",
         confidence: 0
       });
     }
 
     /* =========================
-       🔥 FILTER LOW CONFIDENCE
+       🚨 HANDLE CREDIT LIMIT / EMPTY RESPONSE
     ========================= */
+    if (!data || !data.predictions || data.predictions.length === 0) {
+      return res.json({
+        result: "🌱 Healthy plant (or AI unavailable)",
+        confidence: 0
+      });
+    }
+
     const filtered = data.predictions.filter(p => p.confidence >= 0.3);
 
     if (filtered.length === 0) {
       return res.json({
-        result: "🌱 Healthy plant (low confidence)",
+        result: "🌱 Healthy plant",
         confidence: 0
       });
     }
@@ -104,14 +106,13 @@ app.post("/detect-disease", upload.single("image"), async (req, res) => {
 
     return res.json({
       result: top.class,
-      confidence: top.confidence
+      confidence: Math.round(top.confidence * 100)
     });
 
   } catch (err) {
 
-    console.error("Disease Error:", err);
-
     return res.status(500).json({
+      result: "Server error",
       error: err.message
     });
 
@@ -121,17 +122,14 @@ app.post("/detect-disease", upload.single("image"), async (req, res) => {
 
 
 /* =========================
-   🐛 PEST DETECTION (ROBOFLOW)
+   🐛 PEST DETECTION (ROBUST + FALLBACK)
 ========================= */
 app.post("/detect-pest", upload.single("image"), async (req, res) => {
 
   try {
 
     if (!req.file) {
-      return res.json({
-        result: "No image uploaded",
-        confidence: 0
-      });
+      return res.json({ result: "No image uploaded", confidence: 0 });
     }
 
     const apiKey = "33LnNNZCWrWy3FQGulD9";
@@ -148,11 +146,20 @@ app.post("/detect-pest", upload.single("image"), async (req, res) => {
       body: base64
     });
 
-    const data = await response.json();
+    const text = await response.text();
 
-    console.log("PEST RESPONSE:", data);
+    let data;
 
-    if (!data.predictions || data.predictions.length === 0) {
+    try {
+      data = JSON.parse(text);
+    } catch (err) {
+      return res.json({
+        result: "AI service unavailable ⚠️",
+        confidence: 0
+      });
+    }
+
+    if (!data || !data.predictions || data.predictions.length === 0) {
       return res.json({
         result: "No pest detected 🟢",
         confidence: 0
@@ -172,14 +179,13 @@ app.post("/detect-pest", upload.single("image"), async (req, res) => {
 
     return res.json({
       result: top.class,
-      confidence: top.confidence
+      confidence: Math.round(top.confidence * 100)
     });
 
   } catch (err) {
 
-    console.error("PEST Error:", err);
-
     return res.status(500).json({
+      result: "Server error",
       error: err.message
     });
 
