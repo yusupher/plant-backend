@@ -11,22 +11,18 @@ const upload = multer({ limits: { fileSize: 5 * 1024 * 1024 } });
 app.use(cors());
 app.use(express.json());
 
+/* ================= ENV KEYS ================= */
 const WEATHER_KEY = process.env.WEATHER_KEY;
 const PLANTNET_KEY = process.env.PLANTNET_KEY;
 const ROBOFLOW_KEY = process.env.ROBOFLOW_API_KEY;
 const PLANT_ID_KEY = process.env.PLANT_ID_KEY;
 
-/* =========================
-   🏠 ROOT CHECK (IMPORTANT FOR RENDER)
-========================= */
+/* ================= ROOT (Render FIX) ================= */
 app.get("/", (req, res) => {
   res.send("🌾 Smart Farm API Running");
 });
 
-
-/* =========================
-   🌤️ WEATHER
-========================= */
+/* ================= WEATHER ================= */
 app.get("/weather", async (req, res) => {
   try {
     const { lat, lon, city } = req.query;
@@ -38,8 +34,12 @@ app.get("/weather", async (req, res) => {
     const r = await fetch(url);
     const data = await r.json();
 
+    if (!data.main) {
+      return res.status(500).json({ error: "Invalid weather response" });
+    }
+
     res.json({
-      temp: data.main?.temp,
+      temp: data.main.temp,
       rain: data.rain?.["1h"] || 0,
       desc: data.weather?.[0]?.description,
       location: data.name
@@ -50,10 +50,7 @@ app.get("/weather", async (req, res) => {
   }
 });
 
-
-/* =========================
-   🌍 SOIL (ISRIC)
-========================= */
+/* ================= SOIL ================= */
 app.get("/soil", async (req, res) => {
   try {
     const { lat, lon } = req.query;
@@ -70,23 +67,25 @@ app.get("/soil", async (req, res) => {
   }
 });
 
-
-/* =========================
-   🧠 SMART CROP ENGINE (FIXED + DYNAMIC)
-========================= */
+/* ================= CROP SCORING ENGINE (FIXED) ================= */
 function scoreCrop(crop, env) {
   let score = 0;
 
-  if (env.temp >= crop.tempMin && env.temp <= crop.tempMax) score += 3;
-  if (env.rain >= crop.rainMin) score += 2;
-  if (env.soilPh >= crop.phMin && env.soilPh <= crop.phMax) score += 2;
+  const [tMin, tMax] = crop.temp;
+  const [rMin, rMax] = crop.rain;
+  const [pMin, pMax] = crop.ph;
 
-  if (env.drought && crop.droughtTolerance >= 4) score += 2;
-  if (env.pests && crop.pestResistance >= 4) score += 2;
+  if (env.temp >= tMin && env.temp <= tMax) score += 3;
+  if (env.rain >= rMin && env.rain <= rMax) score += 2;
+  if (env.soilPh >= pMin && env.soilPh <= pMax) score += 2;
+
+  if (env.drought && crop.waterNeedScore <= 2) score += 2;
+  if (env.pests && crop.pestResistanceScore >= 4) score += 2;
 
   return score;
 }
 
+/* ================= AI CROP RECOMMENDATION ================= */
 app.post("/ai-crop", (req, res) => {
   try {
     const { temp, rain, soilPh, drought, pests, zone } = req.body;
@@ -94,7 +93,7 @@ app.post("/ai-crop", (req, res) => {
     let filtered = crops;
 
     if (zone) {
-      filtered = crops.filter(c => c.zone.includes(zone));
+      filtered = crops.filter(c => c.zones.includes(zone));
     }
 
     const scored = filtered.map(c => ({
@@ -114,18 +113,18 @@ app.post("/ai-crop", (req, res) => {
   }
 });
 
-
-/* =========================
-   🌿 PLANT IDENTIFICATION (PlantNet FIXED)
-========================= */
+/* ================= PLANT IDENTIFICATION ================= */
 app.post("/identify-plant", upload.single("image"), async (req, res) => {
   try {
-    if (!req.file) return res.json({ error: "No image uploaded" });
+    if (!req.file) {
+      return res.status(400).json({ error: "No image uploaded" });
+    }
 
     const form = new FormData();
+
     form.append("images", req.file.buffer, {
       filename: "plant.jpg",
-      contentType: "image/jpeg"
+      contentType: req.file.mimetype
     });
 
     const response = await fetch(
@@ -137,7 +136,6 @@ app.post("/identify-plant", upload.single("image"), async (req, res) => {
     );
 
     const data = await response.json();
-
     const top = data?.results?.[0];
 
     res.json({
@@ -153,12 +151,11 @@ app.post("/identify-plant", upload.single("image"), async (req, res) => {
   }
 });
 
-
-/* =========================
-   🦠 DISEASE DETECTION (FIXED ROBofLOW)
-========================= */
+/* ================= DISEASE DETECTION ================= */
 app.post("/detect-disease", upload.single("image"), async (req, res) => {
   try {
+    if (!req.file) return res.status(400).json({ error: "No image uploaded" });
+
     const base64 = req.file.buffer.toString("base64");
 
     const r = await fetch(
@@ -183,12 +180,11 @@ app.post("/detect-disease", upload.single("image"), async (req, res) => {
   }
 });
 
-
-/* =========================
-   🐛 PEST DETECTION
-========================= */
+/* ================= PEST DETECTION ================= */
 app.post("/detect-pest", upload.single("image"), async (req, res) => {
   try {
+    if (!req.file) return res.status(400).json({ error: "No image uploaded" });
+
     const base64 = req.file.buffer.toString("base64");
 
     const r = await fetch(
@@ -213,12 +209,11 @@ app.post("/detect-pest", upload.single("image"), async (req, res) => {
   }
 });
 
-
-/* =========================
-   🌱 PLANT HEALTH (Plant.id FIXED)
-========================= */
+/* ================= PLANT HEALTH ================= */
 app.post("/plant-health", upload.single("image"), async (req, res) => {
   try {
+    if (!req.file) return res.status(400).json({ error: "No image uploaded" });
+
     const base64 = req.file.buffer.toString("base64");
 
     const r = await fetch("https://api.plant.id/v2/identify", {
@@ -248,9 +243,6 @@ app.post("/plant-health", upload.single("image"), async (req, res) => {
   }
 });
 
-
-/* =========================
-   🚀 START
-========================= */
+/* ================= START SERVER ================= */
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log("🚀 Backend running on port " + PORT));
