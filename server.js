@@ -48,7 +48,7 @@ app.post("/identify", upload.single("image"), async (req, res) => {
 
 
 /* =========================
-   🦠 DISEASE DETECTION (ROBOFLOW)
+   🦠 DISEASE DETECTION (FIXED ROBUST)
 ========================= */
 app.post("/detect-disease", upload.single("image"), async (req, res) => {
 
@@ -61,7 +61,7 @@ app.post("/detect-disease", upload.single("image"), async (req, res) => {
       });
     }
 
-    const apiKey = "33LnNNZCWrWy3FQGulD9"; // 🔴 replace this
+    const apiKey = "33LnNNZCWrWy3FQGulD9";
 
     const base64 = req.file.buffer.toString("base64");
 
@@ -79,20 +79,33 @@ app.post("/detect-disease", upload.single("image"), async (req, res) => {
 
     console.log("DISEASE RESPONSE:", data);
 
-    if (data.predictions && data.predictions.length > 0) {
-
-      const top = data.predictions[0];
-
+    /* =========================
+       ❌ NO DETECTION HANDLING
+    ========================= */
+    if (!data.predictions || data.predictions.length === 0) {
       return res.json({
-        result: top.class,
-        confidence: top.confidence
+        result: "🌱 Healthy plant (no disease detected)",
+        confidence: 0
       });
-
     }
 
+    /* =========================
+       🔥 FILTER LOW CONFIDENCE
+    ========================= */
+    const filtered = data.predictions.filter(p => p.confidence >= 0.3);
+
+    if (filtered.length === 0) {
+      return res.json({
+        result: "🌱 Healthy plant (low confidence)",
+        confidence: 0
+      });
+    }
+
+    const top = filtered[0];
+
     return res.json({
-      result: "🌱 Healthy plant (no disease detected)",
-      confidence: 0
+      result: top.class,
+      confidence: top.confidence
     });
 
   } catch (err) {
@@ -122,7 +135,7 @@ app.post("/detect-pest", upload.single("image"), async (req, res) => {
       });
     }
 
-    const apiKey = "33LnNNZCWrWy3FQGulD9"; // 🔴 same key works
+    const apiKey = "33LnNNZCWrWy3FQGulD9";
 
     const base64 = req.file.buffer.toString("base64");
 
@@ -140,20 +153,27 @@ app.post("/detect-pest", upload.single("image"), async (req, res) => {
 
     console.log("PEST RESPONSE:", data);
 
-    if (data.predictions && data.predictions.length > 0) {
-
-      const top = data.predictions[0];
-
+    if (!data.predictions || data.predictions.length === 0) {
       return res.json({
-        result: top.class,
-        confidence: top.confidence
+        result: "No pest detected 🟢",
+        confidence: 0
       });
-
     }
 
+    const filtered = data.predictions.filter(p => p.confidence >= 0.3);
+
+    if (filtered.length === 0) {
+      return res.json({
+        result: "No pest detected 🟢",
+        confidence: 0
+      });
+    }
+
+    const top = filtered[0];
+
     return res.json({
-      result: "No pest detected 🟢",
-      confidence: 0
+      result: top.class,
+      confidence: top.confidence
     });
 
   } catch (err) {
