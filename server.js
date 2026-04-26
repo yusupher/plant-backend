@@ -48,7 +48,7 @@ app.post("/identify", upload.single("image"), async (req, res) => {
 
 
 /* =========================
-   🦠 DISEASE DETECTION (ROBOFLOW - FIXED)
+   🦠 DISEASE DETECTION (ROBOFLOW)
 ========================= */
 app.post("/detect-disease", upload.single("image"), async (req, res) => {
 
@@ -61,7 +61,7 @@ app.post("/detect-disease", upload.single("image"), async (req, res) => {
       });
     }
 
-    const apiKey = "33LnNNZCWrWy3FQGulD9"; // 🔴 PUT YOUR KEY HERE
+    const apiKey = "33LnNNZCWrWy3FQGulD9"; // 🔴 replace this
 
     const base64 = req.file.buffer.toString("base64");
 
@@ -77,7 +77,7 @@ app.post("/detect-disease", upload.single("image"), async (req, res) => {
 
     const data = await response.json();
 
-    console.log("ROBOFLOW RESPONSE:", data);
+    console.log("DISEASE RESPONSE:", data);
 
     if (data.predictions && data.predictions.length > 0) {
 
@@ -96,18 +96,81 @@ app.post("/detect-disease", upload.single("image"), async (req, res) => {
     });
 
   } catch (err) {
+
     console.error("Disease Error:", err);
 
     return res.status(500).json({
       error: err.message
     });
+
   }
 
 });
 
 
 /* =========================
-   🚀 START SERVER (RENDER READY)
+   🐛 PEST DETECTION (ROBOFLOW)
+========================= */
+app.post("/detect-pest", upload.single("image"), async (req, res) => {
+
+  try {
+
+    if (!req.file) {
+      return res.json({
+        result: "No image uploaded",
+        confidence: 0
+      });
+    }
+
+    const apiKey = "33LnNNZCWrWy3FQGulD9"; // 🔴 same key works
+
+    const base64 = req.file.buffer.toString("base64");
+
+    const url = `https://serverless.roboflow.com/insect-e746x-iuclt/1?api_key=${apiKey}`;
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: base64
+    });
+
+    const data = await response.json();
+
+    console.log("PEST RESPONSE:", data);
+
+    if (data.predictions && data.predictions.length > 0) {
+
+      const top = data.predictions[0];
+
+      return res.json({
+        result: top.class,
+        confidence: top.confidence
+      });
+
+    }
+
+    return res.json({
+      result: "No pest detected 🟢",
+      confidence: 0
+    });
+
+  } catch (err) {
+
+    console.error("PEST Error:", err);
+
+    return res.status(500).json({
+      error: err.message
+    });
+
+  }
+
+});
+
+
+/* =========================
+   🚀 START SERVER
 ========================= */
 const PORT = process.env.PORT || 3000;
 
