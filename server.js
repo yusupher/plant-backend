@@ -12,35 +12,42 @@ const upload = multer({ limits: { fileSize: 5 * 1024 * 1024 } });
 app.use(cors());
 app.use(express.json());
 
-/* ================= ENV ================= */
+/* ================= ENV KEYS ================= */
 const WEATHER_KEY = process.env.WEATHER_KEY;
 const PLANTNET_KEY = process.env.PLANTNET_KEY;
 const ROBOFLOW_KEY = process.env.ROBOFLOW_API_KEY;
+const PLANT_ID_KEY = process.env.PLANT_ID_KEY;
 
 /* ================= ROOT ================= */
 app.get("/", (req, res) => {
-  res.send("🌾 Smart Farm AI PRO SYSTEM RUNNING");
+  res.send("🌾 SMART FARM AI FULL SYSTEM RUNNING 🚀");
 });
 
 /* ================= WEATHER ================= */
 app.get("/weather", async (req, res) => {
   try {
-    const { city } = req.query;
+    const { city, lat, lon } = req.query;
 
-    const url = `https://api.openweathermap.org/data/2.5/weather?q=${city},NG&appid=${WEATHER_KEY}&units=metric`;
+    if (!city && (!lat || !lon)) {
+      return res.status(400).json({ error: "Missing location" });
+    }
+
+    const url = city
+      ? `https://api.openweathermap.org/data/2.5/weather?q=${city},NG&appid=${WEATHER_KEY}&units=metric`
+      : `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${WEATHER_KEY}&units=metric`;
 
     const r = await fetch(url);
     const data = await r.json();
 
-    if (!r.ok) return res.status(400).json(data);
+    if (!r.ok) {
+      return res.status(400).json({ error: data.message });
+    }
 
     res.json({
-      temp: data.main?.temp,
+      temp: data.main?.temp || 0,
       rain: data.rain?.["1h"] || 0,
-      desc: data.weather?.[0]?.description,
-      location: data.name,
-      lat: data.coord?.lat,
-      lon: data.coord?.lon
+      desc: data.weather?.[0]?.description || "unknown",
+      location: data.name || city
     });
 
   } catch (e) {
@@ -53,12 +60,22 @@ app.get("/soil", async (req, res) => {
   try {
     const { lat, lon } = req.query;
 
-    const url = `https://rest.isric.org/soilgrids/v2.0/properties/query?lon=${lon}&lat=${lat}&property=phh2o&depth=0-5cm&value=mean`;
+    if (!lat || !lon) {
+      return res.json({
+        ph: 6.2,
+        source: "fallback",
+        note: "missing coordinates"
+      });
+    }
+
+    const url =
+      `https://rest.isric.org/soilgrids/v2.0/properties/query?lon=${lon}&lat=${lat}&property=phh2o&depth=0-5cm&value=mean`;
 
     const r = await fetch(url);
     const data = await r.json();
 
-    const ph = data?.properties?.layers?.[0]?.depths?.[0]?.values?.mean;
+    const ph =
+      data?.properties?.layers?.[0]?.depths?.[0]?.values?.mean;
 
     res.json({
       ph: ph || 6.2,
@@ -70,85 +87,7 @@ app.get("/soil", async (req, res) => {
   }
 });
 
-/* ================= SMART ENGINE HELPERS ================= */
-
-function label(score) {
-  if (score >= 15) return "⭐ BEST MATCH";
-  if (score >= 10) return "⭐ GOOD MATCH";
-  return "⚠ RISKY";
-}
-
-function riskCheck(c, e) {
-  let r = [];
-
-  if (e.temp < c.temp[0] || e.temp > c.temp[1]) r.push("Temperature stress");
-  if (e.rain < c.rain[0]) r.push("Low rainfall risk");
-  if (e.soilPh < c.ph[0] || e.soilPh > c.ph[1]) r.push("Soil pH mismatch");
-
-  return r;
-}
-
-/* ================= NEW: EXPLANATION ENGINE ================= */
-function explain(c, score, risks) {
-  if (score >= 15) {
-    return `${c.name} is highly suitable due to optimal climate and soil match.`;
-  }
-  if (risks.length > 0) {
-    return `${c.name} may struggle due to ${risks.join(", ")}.`;
-  }
-  return `${c.name} is moderately suitable with stable yield potential.`;
-}
-
-/* ================= PROFIT ENGINE ================= */
-function profit(c, e) {
-  const baseYield = c.yield || 5;
-  const price = 180000;
-
-  return Math.round(baseYield * (1 + scoreCrop(c, e) / 20) * price);
-}
-
-/* ================= FERTILIZER ================= */
-function fertilizer(c) {
-  return {
-    perAcreKg: 120,
-    perHectareKg: 300
-  };
-}
-
-/* ================= YIELD PREDICTION ================= */
-function yieldPredict(c, score) {
-  return +(c.yield * (1 + score / 25)).toFixed(2);
-}
-
-/* ================= PLANTING CALENDAR ================= */
-function calendar(state) {
-  const north = ["Kano", "Kaduna", "Sokoto", "Bauchi"];
-  const south = ["Lagos", "Oyo", "Edo", "Rivers"];
-
-  if (south.includes(state)) {
-    return {
-      zone: "Southern Nigeria",
-      crops: ["Cassava", "Maize", "Yam"],
-      season: "March - October"
-    };
-  }
-
-  if (north.includes(state)) {
-    return {
-      zone: "Northern Nigeria",
-      crops: ["Millet", "Sorghum", "Cowpea"],
-      season: "June - September"
-    };
-  }
-
-  return {
-    zone: "Guinea Savanna",
-    crops: ["Maize", "Soybean"],
-    season: "Mixed season"
-  };
-}
-
-/* ================= SCORE ================= */
+/* ================= CORE AI ================= */
 function scoreCrop(c, e) {
   let s = 0;
 
@@ -165,59 +104,85 @@ function scoreCrop(c, e) {
   return s;
 }
 
-/* ================= AI CROP ENGINE ================= */
+function risk(c, e) {
+  let r = [];
+
+  if (e.temp < c.temp[0] || e.temp > c.temp[1])
+    r.push("Temperature stress");
+
+  if (e.rain < c.rain[0])
+    r.push("Low rainfall");
+
+  if (e.soilPh < c.ph[0] || e.soilPh > c.ph[1])
+    r.push("Soil mismatch");
+
+  return r;
+}
+
+function label(score) {
+  if (score >= 12) return "⭐ BEST MATCH";
+  if (score >= 8) return "⭐ GOOD MATCH";
+  return "⚠ RISKY";
+}
+
+function fertilizer(c) {
+  return c.fertilizer || "NPK (general)";
+}
+
+function profit(c, e) {
+  const base = c.yield || 5;
+  const price = 200000;
+  return Math.round(base * (1 + scoreCrop(c, e) / 20) * price);
+}
+
+/* ================= AI CROP ================= */
 app.post("/ai-crop", (req, res) => {
   try {
-    const { temp, rain, soilPh, zone, drought, state } = req.body;
+    const { temp, rain, soilPh, zone, drought } = req.body;
 
     const env = { temp, rain, soilPh, zone, drought };
 
-    const result = crops.map(c => {
+    let list = crops;
+
+    if (zone) {
+      list = crops.filter(c =>
+        c.zones.includes("All") || c.zones.includes(zone)
+      );
+    }
+
+    const result = list.map(c => {
       const score = scoreCrop(c, env);
-      const risks = riskCheck(c, env);
 
       return {
         name: c.name,
         score,
         label: label(score),
-        yield: yieldPredict(c, score),
+        yield: c.yield,
         fertilizer: fertilizer(c),
-        profitPerHectare: profit(c, env),
-        risks,
-        explanation: explain(c, score, risks)
+        profit: profit(c, env),
+        risks: risk(c, env),
+        explanation:
+          risk(c, env).length ? risk(c, env).join(", ") : "Ideal conditions"
       };
     });
 
     result.sort((a, b) => b.score - a.score);
 
-    res.json({
-      top: result.slice(0, 5),
-      calendar: state ? calendar(state) : null
-    });
+    res.json({ top: result.slice(0, 5) });
 
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-/* ================= VOICE ASSISTANT ================= */
-app.post("/voice", (req, res) => {
-  const { lang } = req.body;
-
-  const replies = {
-    igbo: "Cassava na Maize kacha mma maka ugbo gị.",
-    yoruba: "Maize ati Cassava ni o dara julọ.",
-    hausa: "Masara da Gero sun fi dacewa."
-  };
-
-  res.json({ reply: replies[lang] || replies.yoruba });
-});
-
 /* ================= PLANT IDENTIFICATION ================= */
 app.post("/identify-plant", upload.single("image"), async (req, res) => {
   try {
     const form = new FormData();
-    form.append("images", req.file.buffer, { filename: "plant.jpg" });
+    form.append("images", req.file.buffer, {
+      filename: "plant.jpg",
+      contentType: "image/jpeg"
+    });
 
     const r = await fetch(
       `https://my-api.plantnet.org/v2/identify/all?api-key=${PLANTNET_KEY}`,
@@ -225,9 +190,13 @@ app.post("/identify-plant", upload.single("image"), async (req, res) => {
     );
 
     const data = await r.json();
+    const top = data?.results?.[0];
 
     res.json({
-      plant: data?.results?.[0]?.species?.scientificNameWithoutAuthor || "Unknown"
+      plant: top?.species?.commonNames?.[0] ||
+        top?.species?.scientificNameWithoutAuthor ||
+        "Unknown",
+      confidence: top?.score || 0
     });
 
   } catch (e) {
@@ -235,7 +204,37 @@ app.post("/identify-plant", upload.single("image"), async (req, res) => {
   }
 });
 
-/* ================= DISEASE DETECTION ================= */
+/* ================= PLANT HEALTH ================= */
+app.post("/plant-health", upload.single("image"), async (req, res) => {
+  try {
+    const base64 = req.file.buffer.toString("base64");
+
+    const r = await fetch("https://api.plant.id/v2/identify", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Api-Key": PLANT_ID_KEY
+      },
+      body: JSON.stringify({
+        images: [`data:image/jpeg;base64,${base64}`],
+        modifiers: ["health_all"]
+      })
+    });
+
+    const data = await r.json();
+    const top = data?.suggestions?.[0];
+
+    res.json({
+      health: Math.round((top?.health?.probability || 0) * 100),
+      status: top?.health?.probability > 0.6 ? "Healthy" : "Unhealthy"
+    });
+
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/* ================= DISEASE ================= */
 app.post("/detect-disease", upload.single("image"), async (req, res) => {
   try {
     const base64 = req.file.buffer.toString("base64");
@@ -250,10 +249,11 @@ app.post("/detect-disease", upload.single("image"), async (req, res) => {
     );
 
     const data = await r.json();
+    const top = data?.predictions?.[0];
 
     res.json({
-      disease: data?.predictions?.[0]?.class || "Healthy",
-      confidence: Math.round((data?.predictions?.[0]?.confidence || 0) * 100)
+      disease: top?.class || "Healthy",
+      confidence: Math.round((top?.confidence || 0) * 100)
     });
 
   } catch (e) {
@@ -261,9 +261,37 @@ app.post("/detect-disease", upload.single("image"), async (req, res) => {
   }
 });
 
-/* ================= START SERVER ================= */
-const PORT = process.env.PORT || 3000;
+/* ================= AI CHAT ================= */
+app.post("/ai-chat", (req, res) => {
+  const { message } = req.body;
 
-app.listen(PORT, () => {
-  console.log("🚀 Smart Farm AI PRO SYSTEM running on " + PORT);
+  let reply = "Ask about crops, soil, fertilizer or pests.";
+
+  if (message?.toLowerCase().includes("plant"))
+    reply = "Best planting depends on rainfall and zone.";
+
+  if (message?.toLowerCase().includes("fertilizer"))
+    reply = "Use NPK based on crop type.";
+
+  if (message?.toLowerCase().includes("disease"))
+    reply = "Check leaf color and apply pesticide if needed.";
+
+  res.json({ reply });
 });
+
+/* ================= VOICE ================= */
+app.post("/voice", (req, res) => {
+  const { lang, text } = req.body;
+
+  let speech = text;
+
+  if (lang === "yoruba") speech = "E kaaro. " + text;
+  if (lang === "igbo") speech = "Ndewo. " + text;
+  if (lang === "hausa") speech = "Sannu. " + text;
+
+  res.json({ speech, lang });
+});
+
+/* ================= START ================= */
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log("🚀 FULL SMART FARM RUNNING ON " + PORT));
