@@ -3,7 +3,7 @@ const multer = require("multer");
 const cors = require("cors");
 const fetch = require("node-fetch");
 const FormData = require("form-data");
-const crops = require("./cropData");
+const crops = require("./cropdata");
 
 const app = express();
 const upload = multer({ limits: { fileSize: 5 * 1024 * 1024 } });
