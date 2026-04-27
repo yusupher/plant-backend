@@ -23,7 +23,6 @@ app.get("/", (req, res) => {
   });
 });
 
-
 // ==============================
 // 🌿 PLANT IDENTIFICATION (PLANTNET)
 // ==============================
@@ -50,14 +49,14 @@ app.post("/identify", upload.single("image"), async (req, res) => {
 
     const data = await response.json();
 
-    res.json({
+    return res.json({
       success: true,
       source: "PlantNet",
       data
     });
 
   } catch (err) {
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: "Plant identification failed",
       message: err.message
@@ -65,9 +64,8 @@ app.post("/identify", upload.single("image"), async (req, res) => {
   }
 });
 
-
 // ==============================
-// 🦠 DISEASE DETECTION (ROBUST)
+// 🦠 DISEASE DETECTION (ROBUST FIXED)
 // ==============================
 app.post("/disease", upload.single("image"), async (req, res) => {
   try {
@@ -92,7 +90,14 @@ app.post("/disease", upload.single("image"), async (req, res) => {
         body: base64
       });
 
-      const rfData = await rfResponse.json();
+      const rfText = await rfResponse.text();
+
+      let rfData;
+      try {
+        rfData = JSON.parse(rfText);
+      } catch {
+        rfData = null;
+      }
 
       if (rfData && !rfData.error) {
         return res.json({
@@ -102,11 +107,11 @@ app.post("/disease", upload.single("image"), async (req, res) => {
         });
       }
     } catch (err) {
-      console.log("Roboflow error:", err.message);
+      console.log("Roboflow failed:", err.message);
     }
 
     // ==========================
-    // 2. PLANT.ID (FALLBACK FIXED)
+    // 2. PLANT.ID (SAFE FALLBACK)
     // ==========================
     try {
       const plantIdResponse = await fetch(
@@ -118,23 +123,23 @@ app.post("/disease", upload.single("image"), async (req, res) => {
             "Api-Key": "ywQIn1Yv9I2T8aJ2dNbkL1YMo1ri6tGkhrMOT9FhPnnmcuQViH"
           },
           body: JSON.stringify({
-            images: [{ image: base64 }],
+            images: [base64],
             health: "only",
-            similar_images: true
+            similar_images: false
           })
         }
       );
 
       const text = await plantIdResponse.text();
 
-      let plantIdData;
+      let plantData;
       try {
-        plantIdData = JSON.parse(text);
-      } catch (e) {
+        plantData = JSON.parse(text);
+      } catch {
         return res.json({
           success: false,
           source: "Plant.id",
-          error: "Invalid response from Plant.id",
+          error: "Invalid JSON response",
           raw: text
         });
       }
@@ -142,29 +147,28 @@ app.post("/disease", upload.single("image"), async (req, res) => {
       return res.json({
         success: true,
         source: "Plant.id (fallback)",
-        data: plantIdData
+        data: plantData
       });
 
     } catch (err) {
       return res.status(500).json({
         success: false,
-        error: "Plant.id failed",
+        error: "Plant.id request failed",
         message: err.message
       });
     }
 
   } catch (err) {
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-      error: "Disease detection failed",
+      error: "Unexpected server error",
       message: err.message
     });
   }
 });
 
-
 // ==============================
-// START SERVER (RENDER SAFE)
+// START SERVER
 // ==============================
 const PORT = process.env.PORT || 3000;
 
