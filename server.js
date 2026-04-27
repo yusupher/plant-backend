@@ -29,7 +29,10 @@ app.get("/", (req, res) => {
 app.post("/identify", upload.single("image"), async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({ success: false, error: "No image uploaded" });
+      return res.status(400).json({
+        success: false,
+        error: "No image uploaded"
+      });
     }
 
     const form = new FormData();
@@ -65,30 +68,37 @@ app.post("/identify", upload.single("image"), async (req, res) => {
 });
 
 // ==============================
-// 🦠 DISEASE DETECTION (ROBUST FIXED)
+// 🦠 DISEASE DETECTION (ROBOFLOW + FALLBACK)
 // ==============================
 app.post("/disease", upload.single("image"), async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({ success: false, error: "No image uploaded" });
+      return res.status(400).json({
+        success: false,
+        error: "No image uploaded"
+      });
     }
 
-    const base64 = req.file.buffer.toString("base64");
+    // clean base64 (IMPORTANT FIX)
+    const base64 = req.file.buffer
+      .toString("base64")
+      .replace(/^data:image\/\w+;base64,/, "");
 
     // ==========================
     // 1. ROBOFLOW (PRIMARY)
     // ==========================
     try {
-      const roboflowUrl =
-        "https://detect.roboflow.com/cassava-disease/1?api_key=33LnNNZCWrWy3FQGulD9";
-
-      const rfResponse = await fetch(roboflowUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded"
-        },
-        body: base64
-      });
+      const rfResponse = await fetch(
+        "https://serverless.roboflow.com/plant-dataset-ypln5-to68g/1",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Authorization": "Bearer 33LnNNZCWrWy3FQGulD9"
+          },
+          body: base64
+        }
+      );
 
       const rfText = await rfResponse.text();
 
@@ -96,22 +106,23 @@ app.post("/disease", upload.single("image"), async (req, res) => {
       try {
         rfData = JSON.parse(rfText);
       } catch {
-        rfData = null;
+        rfData = { raw: rfText };
       }
 
-      if (rfData && !rfData.error) {
+      if (rfData && rfData.predictions && rfData.predictions.length > 0) {
         return res.json({
           success: true,
           source: "Roboflow",
           data: rfData
         });
       }
+
     } catch (err) {
-      console.log("Roboflow failed:", err.message);
+      console.log("Roboflow error:", err.message);
     }
 
     // ==========================
-    // 2. PLANT.ID (SAFE FALLBACK)
+    // 2. PLANT.ID (FALLBACK SAFE)
     // ==========================
     try {
       const plantIdResponse = await fetch(
@@ -139,7 +150,7 @@ app.post("/disease", upload.single("image"), async (req, res) => {
         return res.json({
           success: false,
           source: "Plant.id",
-          error: "Invalid JSON response",
+          error: "Invalid response",
           raw: text
         });
       }
@@ -153,7 +164,7 @@ app.post("/disease", upload.single("image"), async (req, res) => {
     } catch (err) {
       return res.status(500).json({
         success: false,
-        error: "Plant.id request failed",
+        error: "Plant.id failed",
         message: err.message
       });
     }
