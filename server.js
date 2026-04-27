@@ -1,7 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const multer = require("multer");
-const axios = require("axios");
+const fetch = require("node-fetch");
 const FormData = require("form-data");
 
 const app = express();
@@ -10,55 +10,126 @@ const upload = multer({ storage: multer.memoryStorage() });
 app.use(cors());
 app.use(express.json());
 
-// ======================
-// PLANT IDENTIFICATION
-// ======================
-app.post("/identify", upload.single("image"), async (req, res) => {
-  try {
-    const form = new FormData();
-    form.append("images", req.file.buffer, "plant.jpg");
-
-    const response = await axios.post(
-      "https://my-api.plantnet.org/v2/identify/all?api-key=YOUR_PLANTNET_KEY",
-      form,
-      { headers: form.getHeaders() }
-    );
-
-    res.json(response.data);
-  } catch (err) {
-    res.status(500).json({
-      error: "Plant identification failed",
-      details: err.message,
-    });
-  }
+// ==============================
+// HEALTH CHECK
+// ==============================
+app.get("/", (req, res) => {
+  res.json({
+    status: "Plant AI Backend Running 🚀",
+    endpoints: ["/identify", "/disease"]
+  });
 });
 
-// ======================
-// DISEASE DETECTION (Plant.id optional)
-// ======================
-app.post("/disease", upload.single("image"), async (req, res) => {
+
+// ==============================
+// 🌿 PLANT IDENTIFICATION (PLANTNET)
+// ==============================
+app.post("/identify", upload.single("image"), async (req, res) => {
   try {
-    const response = await axios.post(
-      "https://api.plant.id/v3/health_assessment",
+    if (!req.file) return res.status(400).json({ error: "No image uploaded" });
+
+    const form = new FormData();
+    form.append("images", req.file.buffer, {
+      filename: "plant.jpg",
+      contentType: "image/jpeg"
+    });
+
+    const response = await fetch(
+      `https://my-api.plantnet.org/v2/identify/all?api-key=2b104s5nNyqRjHHyiCJveuBwu`,
       {
-        images: [req.file.buffer.toString("base64")],
-        similar_images: true,
-      },
-      {
-        headers: {
-          "Content-Type": "application/json",
-          "Api-Key": "YOUR_PLANT_ID_KEY",
-        },
+        method: "POST",
+        body: form,
+        headers: form.getHeaders()
       }
     );
 
-    res.json(response.data);
+    const data = await response.json();
+    res.json({
+      source: "PlantNet",
+      data
+    });
+
   } catch (err) {
     res.status(500).json({
-      error: "Disease detection failed",
-      details: err.message,
+      error: "Plant identification failed",
+      message: err.message
     });
   }
 });
 
-app.listen(3000, () => console.log("Server running on http://localhost:3000"));
+
+// ==============================
+// 🦠 DISEASE & PEST DETECTION (ROBOFLOW PRIMARY)
+// ==============================
+app.post("/disease", upload.single("image"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: "No image uploaded" });
+
+    const base64 = req.file.buffer.toString("base64");
+
+    // ==========================
+    // 1. ROBOFLOW (PRIMARY)
+    // ==========================
+    const roboflowUrl =
+      "https://detect.roboflow.com/your-model-name?api_key=33LnNNZCWrWy3FQGulD9";
+
+    const rfResponse = await fetch(roboflowUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: base64
+    });
+
+    const rfData = await rfResponse.json();
+
+    // If Roboflow works → return it
+    if (rfData && !rfData.error) {
+      return res.json({
+        source: "Roboflow",
+        data: rfData
+      });
+    }
+
+    // ==========================
+    // 2. FALLBACK → PLANT.ID
+    // ==========================
+    const plantIdResponse = await fetch(
+      "https://api.plant.id/v3/health_assessment",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Api-Key": "ywQIn1Yv9I2T8aJ2dNbkL1YMo1ri6tGkhrMOT9FhPnnmcuQViH"
+        },
+        body: JSON.stringify({
+          images: [base64],
+          similar_images: true
+        })
+      }
+    );
+
+    const plantIdData = await plantIdResponse.json();
+
+    res.json({
+      source: "Plant.id (fallback)",
+      data: plantIdData
+    });
+
+  } catch (err) {
+    res.status(500).json({
+      error: "Disease detection failed",
+      message: err.message
+    });
+  }
+});
+
+
+// ==============================
+// START SERVER (RENDER SAFE)
+// ==============================
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+  console.log(`Plant AI Backend running on port ${PORT}`);
+});
