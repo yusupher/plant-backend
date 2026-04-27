@@ -7,11 +7,15 @@ const FormData = require("form-data");
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 
-// ==============================
-// MIDDLEWARE
-// ==============================
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
+
+// ==============================
+// KEYS (YOUR REAL KEYS)
+// ==============================
+const PLANTNET_KEY = "2b104s5nNyqRjHHyiCJveuBwu";
+const ROBOFLOW_KEY = "33LnNNZCWrWy3FQGulD9";
+const ROBOFLOW_MODEL = "plant-dataset-ypln5-to68g/1";
 
 // ==============================
 // HEALTH CHECK
@@ -24,16 +28,12 @@ app.get("/", (req, res) => {
 });
 
 // ==============================
-// 🌿 PLANT IDENTIFICATION (PLANTNET)
+// 🌿 PLANT IDENTIFICATION
 // ==============================
 app.post("/identify", upload.single("image"), async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        error: "No image uploaded"
-      });
-    }
+    if (!req.file)
+      return res.status(400).json({ success: false, error: "No image uploaded" });
 
     const form = new FormData();
     form.append("images", req.file.buffer, {
@@ -42,7 +42,7 @@ app.post("/identify", upload.single("image"), async (req, res) => {
     });
 
     const response = await fetch(
-      "https://my-api.plantnet.org/v2/identify/all?api-key=2b104s5nNyqRjHHyiCJveuBwu",
+      `https://my-api.plantnet.org/v2/identify/all?api-key=${PLANTNET_KEY}`,
       {
         method: "POST",
         body: form,
@@ -52,96 +52,83 @@ app.post("/identify", upload.single("image"), async (req, res) => {
 
     const data = await response.json();
 
-    return res.json({
+    res.json({
       success: true,
       source: "PlantNet",
       data
     });
-
   } catch (err) {
-    return res.status(500).json({
+    res.status(500).json({
       success: false,
-      error: "Plant identification failed",
-      message: err.message
+      error: err.message
     });
   }
 });
 
 // ==============================
-// 🦠 DISEASE DETECTION (ROBOFLOW + FALLBACK)
+// 🦠 DISEASE DETECTION (ROBUST)
 // ==============================
 app.post("/disease", upload.single("image"), async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        error: "No image uploaded"
-      });
-    }
+    if (!req.file)
+      return res.status(400).json({ success: false, error: "No image uploaded" });
 
-    // clean base64 (IMPORTANT FIX)
-    const base64 = req.file.buffer
-      .toString("base64")
-      .replace(/^data:image\/\w+;base64,/, "");
+    const base64 = req.file.buffer.toString("base64");
 
     // ==========================
-    // 1. ROBOFLOW (PRIMARY)
+    // 1. ROBOFLOW (FIXED SERVERLESS)
     // ==========================
     try {
-      const rfResponse = await fetch(
-        "https://serverless.roboflow.com/plant-dataset-ypln5-to68g/1",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Authorization": "Bearer 33LnNNZCWrWy3FQGulD9"
-          },
-          body: base64
-        }
-      );
+      const rfUrl = `https://serverless.roboflow.com/${ROBOFLOW_MODEL}?api_key=${ROBOFLOW_KEY}`;
 
-      const rfText = await rfResponse.text();
+      const rfRes = await fetch(rfUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded"
+        },
+        body: base64
+      });
 
+      const rfText = await rfRes.text();
       let rfData;
+
       try {
         rfData = JSON.parse(rfText);
       } catch {
         rfData = { raw: rfText };
       }
 
-      if (rfData && rfData.predictions && rfData.predictions.length > 0) {
+      if (rfData && !rfData.error) {
         return res.json({
           success: true,
           source: "Roboflow",
           data: rfData
         });
       }
-
     } catch (err) {
-      console.log("Roboflow error:", err.message);
+      console.log("Roboflow failed:", err.message);
     }
 
     // ==========================
-    // 2. PLANT.ID (FALLBACK SAFE)
+    // 2. PLANT.ID SAFE FALLBACK
     // ==========================
     try {
-      const plantIdResponse = await fetch(
+      const plantRes = await fetch(
         "https://api.plant.id/v3/health_assessment",
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "Api-Key": "ywQIn1Yv9I2T8aJ2dNbkL1YMo1ri6tGkhrMOT9FhPnnmcuQViH"
+            "Api-Key": "PUT_YOUR_PLANT_ID_KEY_HERE"
           },
           body: JSON.stringify({
-            images: [base64],
-            health: "only",
-            similar_images: false
+            images: [{ image: base64 }],
+            health: "only"
           })
         }
       );
 
-      const text = await plantIdResponse.text();
+      const text = await plantRes.text();
 
       let plantData;
       try {
@@ -150,7 +137,7 @@ app.post("/disease", upload.single("image"), async (req, res) => {
         return res.json({
           success: false,
           source: "Plant.id",
-          error: "Invalid response",
+          error: "Invalid response from Plant.id",
           raw: text
         });
       }
@@ -162,18 +149,17 @@ app.post("/disease", upload.single("image"), async (req, res) => {
       });
 
     } catch (err) {
-      return res.status(500).json({
+      return res.json({
         success: false,
-        error: "Plant.id failed",
-        message: err.message
+        source: "Plant.id",
+        error: err.message
       });
     }
 
   } catch (err) {
-    return res.status(500).json({
+    res.status(500).json({
       success: false,
-      error: "Unexpected server error",
-      message: err.message
+      error: err.message
     });
   }
 });
@@ -184,5 +170,5 @@ app.post("/disease", upload.single("image"), async (req, res) => {
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log(`🚀 Plant AI Backend running on port ${PORT}`);
+  console.log("🚀 Plant AI running on port", PORT);
 });
