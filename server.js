@@ -7,8 +7,14 @@ const FormData = require("form-data");
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 
-app.use(cors());
+// ✅ FIXED CORS (important for frontend)
+app.use(cors({
+  origin: "*",
+  methods: ["GET", "POST"]
+}));
+
 app.use(express.json());
+
 
 // ==============================
 // HEALTH CHECK
@@ -34,6 +40,8 @@ app.post("/identify", upload.single("image"), async (req, res) => {
       contentType: "image/jpeg"
     });
 
+    form.append("organs", "leaf");
+
     const response = await fetch(
       `https://my-api.plantnet.org/v2/identify/all?api-key=2b104s5nNyqRjHHyiCJveuBwu`,
       {
@@ -44,7 +52,8 @@ app.post("/identify", upload.single("image"), async (req, res) => {
     );
 
     const data = await response.json();
-    res.json({
+
+    return res.json({
       source: "PlantNet",
       data
     });
@@ -59,7 +68,7 @@ app.post("/identify", upload.single("image"), async (req, res) => {
 
 
 // ==============================
-// 🦠 DISEASE & PEST DETECTION (ROBOFLOW PRIMARY)
+// 🦠 DISEASE DETECTION
 // ==============================
 app.post("/disease", upload.single("image"), async (req, res) => {
   try {
@@ -71,7 +80,7 @@ app.post("/disease", upload.single("image"), async (req, res) => {
     // 1. ROBOFLOW (PRIMARY)
     // ==========================
     const roboflowUrl =
-      "https://detect.roboflow.com/your-model-name?api_key=33LnNNZCWrWy3FQGulD9";
+      "https://detect.roboflow.com/YOUR_MODEL_NAME/1?api_key=33LnNNZCWrWy3FQGulD9";
 
     const rfResponse = await fetch(roboflowUrl, {
       method: "POST",
@@ -83,8 +92,7 @@ app.post("/disease", upload.single("image"), async (req, res) => {
 
     const rfData = await rfResponse.json();
 
-    // If Roboflow works → return it
-    if (rfData && !rfData.error) {
+    if (rfData && rfData.predictions) {
       return res.json({
         source: "Roboflow",
         data: rfData
@@ -92,7 +100,7 @@ app.post("/disease", upload.single("image"), async (req, res) => {
     }
 
     // ==========================
-    // 2. FALLBACK → PLANT.ID
+    // 2. PLANT.ID FALLBACK
     // ==========================
     const plantIdResponse = await fetch(
       "https://api.plant.id/v3/health_assessment",
@@ -111,7 +119,7 @@ app.post("/disease", upload.single("image"), async (req, res) => {
 
     const plantIdData = await plantIdResponse.json();
 
-    res.json({
+    return res.json({
       source: "Plant.id (fallback)",
       data: plantIdData
     });
@@ -126,7 +134,7 @@ app.post("/disease", upload.single("image"), async (req, res) => {
 
 
 // ==============================
-// START SERVER (RENDER SAFE)
+// START SERVER
 // ==============================
 const PORT = process.env.PORT || 3000;
 
