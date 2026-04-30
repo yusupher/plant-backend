@@ -210,115 +210,55 @@ app.post("/detect-pest", upload.single("image"), async (req, res) => {
 
 // ==============================
 // 🤖 CLAUDE AI COMPREHENSIVE INFO
-// (with built-in fallback if API fails)
+// (web search powered — real results)
 // ==============================
 
 function buildFallback(query, type) {
-  const q = query.toLowerCase();
   if (type === "plant") {
     return {
-      commonName: query,
-      scientificName: query,
-      family: "Unknown",
-      order: "Unknown",
-      kingdom: "Plantae",
-      class: "Unknown",
-      category: "crop",
-      origin: "Tropical/Subtropical regions",
-      description: `${query} is a plant species. For detailed botanical information, consult a local agricultural extension office or botanical reference.`,
+      commonName: query, scientificName: query, family: "—", order: "—",
+      kingdom: "Plantae", class: "—", category: "crop", origin: "Tropical/Subtropical regions",
+      description: `${query} is a plant species. Detailed information could not be retrieved at this time.`,
       uses: ["Food production", "Traditional medicine", "Agricultural use"],
-      nutritionalValue: "Contains essential nutrients — consult nutritional databases for specifics.",
-      economicImportance: "Economically important crop in tropical and subtropical farming systems.",
+      nutritionalValue: "Consult nutritional databases for specifics.",
+      economicImportance: "Economically important in tropical and subtropical farming systems.",
       ecologicalRole: "Plays a role in local ecosystems and agricultural biodiversity.",
-      growingConditions: {
-        climate: "Tropical to subtropical",
-        soil: "Well-drained loamy soil",
-        rainfall: "500–1500mm per year",
-        temperature: "18–35°C"
-      },
-      isWeed: false,
-      weedControl: null,
-      interestingFacts: [
-        "Widely cultivated across Africa and Asia.",
-        "Important for food security in developing regions."
-      ]
+      growingConditions: { climate: "Tropical to subtropical", soil: "Well-drained loamy soil", rainfall: "500–1500mm/year", temperature: "18–35°C" },
+      isWeed: false, weedControl: null,
+      interestingFacts: ["Widely cultivated across Africa and Asia.", "Important for food security in developing regions."]
     };
   } else if (type === "disease") {
     return {
-      diseaseName: query,
-      pathogenType: "fungal",
-      pathogenName: "Unknown pathogen",
+      diseaseName: query, pathogenType: "fungal", pathogenName: "Unknown pathogen",
       affectedPlants: ["Various crop plants"],
-      symptoms: [
-        "Leaf discoloration or spotting",
-        "Wilting or stunted growth",
-        "Lesions on stem or fruit",
-        "Premature leaf drop"
-      ],
+      symptoms: ["Leaf discoloration or spotting", "Wilting or stunted growth", "Lesions on stem or fruit", "Premature leaf drop"],
       spreadMechanism: "Spreads through infected plant material, wind, water splash, and contaminated tools.",
-      favorableConditions: "High humidity, warm temperatures, and poor air circulation favor disease development.",
+      favorableConditions: "High humidity, warm temperatures, and poor air circulation.",
       economicImpact: "Can cause significant yield losses if not managed early.",
       control: {
-        cultural: [
-          "Remove and destroy infected plant material",
-          "Rotate crops to break disease cycle",
-          "Avoid overhead irrigation",
-          "Plant certified disease-free seeds"
-        ],
-        biological: [
-          "Trichoderma spp. — apply as soil drench or foliar spray",
-          "Bacillus subtilis-based biocontrol products"
-        ],
-        chemical: [
-          "Mancozeb 80WP — 2.5g/L water, spray every 7–14 days",
-          "Copper oxychloride — 3g/L water as preventive spray",
-          "Consult local agronomist for registered products"
-        ],
-        resistant_varieties: ["Use locally recommended resistant varieties where available"],
-        ipmSummary: "Apply IPM by combining cultural practices (sanitation, rotation), biological agents, and targeted chemical application only when disease pressure is high. Monitor regularly and act early."
+        cultural: ["Remove and destroy infected material", "Rotate crops", "Avoid overhead irrigation", "Use certified disease-free seeds"],
+        biological: ["Trichoderma spp. — soil drench or foliar spray", "Bacillus subtilis-based biocontrol products"],
+        chemical: ["Mancozeb 80WP — 2.5g/L, spray every 7–14 days", "Copper oxychloride — 3g/L as preventive spray"],
+        resistant_varieties: ["Use locally recommended resistant varieties"],
+        ipmSummary: "Combine cultural practices, biological agents, and targeted chemical application only when disease pressure is high."
       },
-      preventionTips: [
-        "Inspect plants regularly for early signs",
-        "Maintain field hygiene — remove crop debris",
-        "Use certified seed and resistant varieties",
-        "Avoid working in fields when plants are wet"
-      ]
+      preventionTips: ["Inspect plants regularly", "Maintain field hygiene", "Use certified seed and resistant varieties", "Avoid working in wet fields"]
     };
   } else {
     return {
-      pestName: query,
-      scientificName: "Unknown species",
-      pestType: "insect",
+      pestName: query, scientificName: "Unknown species", pestType: "insect",
       affectedPlants: ["Various crop plants"],
-      damageDescription: "Causes physical damage to leaves, stems, roots, or fruits, leading to reduced yield and plant vigor.",
-      lifeStages: ["Egg", "Larva/Nymph", "Adult"],
-      peakActivity: "Most active during warm, humid seasons.",
-      economicThreshold: "Take action when 10–15% of plants show visible damage or pest count exceeds 5 per plant.",
+      damageDescription: "Causes physical damage to leaves, stems, roots, or fruits reducing yield and plant vigor.",
+      lifeStages: ["Egg", "Larva/Nymph", "Adult"], peakActivity: "Most active during warm, humid seasons.",
+      economicThreshold: "Act when 10–15% of plants show visible damage or >5 pests per plant.",
       control: {
-        cultural: [
-          "Crop rotation to disrupt pest lifecycle",
-          "Deep ploughing to expose pupae and eggs",
-          "Intercropping to reduce pest buildup",
-          "Remove crop residues after harvest"
-        ],
-        biological: [
-          "Encourage natural predators — ladybirds, lacewings, parasitic wasps",
-          "Apply Beauveria bassiana or Metarhizium for fungal biocontrol",
-          "Use neem-based biopesticides (Azadirachtin)"
-        ],
-        mechanical: [
-          "Yellow sticky traps to monitor and catch flying adults",
-          "Hand-picking of larvae from small farms",
-          "Use of insect nets or row covers"
-        ],
-        chemical: [
-          "Cypermethrin 10EC — 10ml/L water, spray at early infestation",
-          "Lambda-cyhalothrin — 5ml/L water for severe outbreaks",
-          "Rotate chemical classes to prevent resistance"
-        ],
-        ipmSummary: "Use IPM: start with cultural controls and monitoring, introduce biological agents early, and only use chemicals as a last resort when pest populations exceed economic thresholds. Always follow label instructions."
+        cultural: ["Crop rotation", "Deep ploughing to expose pupae", "Intercropping", "Remove crop residues"],
+        biological: ["Encourage natural predators — ladybirds, lacewings, parasitic wasps", "Apply Beauveria bassiana or Metarhizium", "Neem-based biopesticides (Azadirachtin)"],
+        mechanical: ["Yellow sticky traps", "Hand-picking of larvae", "Insect nets or row covers"],
+        chemical: ["Cypermethrin 10EC — 10ml/L, spray at early infestation", "Lambda-cyhalothrin — 5ml/L for severe outbreaks"],
+        ipmSummary: "Start with cultural controls, introduce biological agents early, use chemicals only as last resort when populations exceed economic thresholds."
       },
-      safetyNotes: "Wear protective clothing when applying pesticides. Observe pre-harvest intervals. Store chemicals safely away from children and food. Dispose of containers responsibly."
+      safetyNotes: "Wear PPE when applying pesticides. Observe pre-harvest intervals. Store chemicals safely away from children and food."
     };
   }
 }
@@ -326,30 +266,36 @@ function buildFallback(query, type) {
 app.post("/claude-info", async (req, res) => {
   try {
     const { query, type } = req.body;
-    if (!query || !type) {
-      return res.status(400).json({ success: false, error: "Missing query or type" });
-    }
-    if (!["plant", "disease", "pest"].includes(type)) {
-      return res.status(400).json({ success: false, error: "Invalid type. Use: plant, disease, or pest" });
-    }
+    if (!query || !type) return res.status(400).json({ success: false, error: "Missing query or type" });
+    if (!["plant", "disease", "pest"].includes(type)) return res.status(400).json({ success: false, error: "Invalid type" });
 
-    let prompt = "";
+    let systemPrompt = "";
+    let userPrompt = "";
+
     if (type === "plant") {
-      prompt = `You are a professional botanist and agronomist. Provide comprehensive information about the plant: "${query}".
-Return ONLY valid JSON (no markdown fences, no extra text) with this exact structure:
-{"commonName":"","scientificName":"","family":"","order":"","kingdom":"Plantae","class":"","category":"crop|tree|weed|shrub|herb|grass","origin":"","description":"2-3 sentences about appearance and habitat","uses":["use1","use2","use3"],"nutritionalValue":"string or null","economicImportance":"","ecologicalRole":"","growingConditions":{"climate":"","soil":"","rainfall":"","temperature":""},"isWeed":false,"weedControl":null,"interestingFacts":["fact1","fact2"]}
-If it is a weed set isWeed:true and fill weedControl:{"cultural":["method1"],"mechanical":["method1"],"biological":["agent - description"],"chemical":["herbicide - dosage/use"],"ipmSummary":"full IPM weed control summary"}`;
+      systemPrompt = "You are a professional botanist and agronomist. You MUST use the web_search tool to search for accurate, specific information about the plant before answering. Search for its scientific classification, uses, growing conditions, and if it is a weed, its IPM control methods. Base your answer entirely on search results, not generic knowledge.";
+      userPrompt = `Search the web for comprehensive information about the plant: "${query}". 
+Search for: its scientific name, family, classification (crop/tree/weed), origin, uses, nutritional value, economic importance, growing conditions, and if it is a weed its full IPM control methods.
+After searching, return ONLY valid JSON (no markdown, no extra text):
+{"commonName":"","scientificName":"","family":"","order":"","kingdom":"Plantae","class":"","category":"crop|tree|weed|shrub|herb|grass","origin":"","description":"3-4 specific sentences from search results","uses":["specific use 1","specific use 2","specific use 3","specific use 4"],"nutritionalValue":"specific nutritional info or null","economicImportance":"specific economic data","ecologicalRole":"","growingConditions":{"climate":"","soil":"","rainfall":"","temperature":""},"isWeed":false,"weedControl":null,"interestingFacts":["specific fact 1","specific fact 2","specific fact 3"]}
+If weed, set isWeed:true and weedControl:{"cultural":["specific method"],"mechanical":["specific method"],"biological":["specific agent and how"],"chemical":["specific herbicide name - specific dosage"],"ipmSummary":"specific IPM strategy for this exact weed"}`;
+
     } else if (type === "disease") {
-      prompt = `You are a plant pathologist. Provide comprehensive information about the plant disease: "${query}".
-Return ONLY valid JSON (no markdown, no extra text):
-{"diseaseName":"","pathogenType":"fungal|bacterial|viral|nematode|physiological","pathogenName":"","affectedPlants":["plant1"],"symptoms":["symptom1","symptom2"],"spreadMechanism":"","favorableConditions":"","economicImpact":"","control":{"cultural":["practice1"],"biological":["agent1"],"chemical":["fungicide - rate"],"resistant_varieties":["variety1"],"ipmSummary":""},"preventionTips":["tip1","tip2"]}`;
+      systemPrompt = "You are a plant pathologist. You MUST use the web_search tool to search for accurate, specific information about this plant disease before answering. Search for the pathogen name, symptoms, spread, and specific control measures including fungicide/bactericide names and dosages.";
+      userPrompt = `Search the web for comprehensive information about the plant disease: "${query}".
+Search for: its causal pathogen, affected crops, specific symptoms, how it spreads, favorable conditions, economic impact, and specific IPM control measures with chemical names and rates.
+After searching, return ONLY valid JSON (no markdown, no extra text):
+{"diseaseName":"","pathogenType":"fungal|bacterial|viral|nematode|physiological","pathogenName":"specific pathogen scientific name","affectedPlants":["specific crop 1","specific crop 2"],"symptoms":["specific symptom 1","specific symptom 2","specific symptom 3","specific symptom 4"],"spreadMechanism":"specific spread mechanism from search","favorableConditions":"specific conditions","economicImpact":"specific yield loss data","control":{"cultural":["specific practice 1","specific practice 2"],"biological":["specific bioagent 1","specific bioagent 2"],"chemical":["specific fungicide name - specific rate per litre","specific fungicide 2 - rate"],"resistant_varieties":["specific variety name if found"],"ipmSummary":"specific integrated strategy for this disease"},"preventionTips":["specific tip 1","specific tip 2","specific tip 3"]}`;
+
     } else {
-      prompt = `You are an entomologist and pest management expert. Provide comprehensive information about the pest: "${query}".
-Return ONLY valid JSON (no markdown, no extra text):
-{"pestName":"","scientificName":"","pestType":"insect|mite|nematode|rodent|mollusk|bird","affectedPlants":["plant1"],"damageDescription":"","lifeStages":["stage1"],"peakActivity":"","economicThreshold":"","control":{"cultural":["practice1"],"biological":["natural enemy 1"],"mechanical":["trap/barrier"],"chemical":["pesticide - dosage"],"ipmSummary":""},"safetyNotes":""}`;
+      systemPrompt = "You are an entomologist and pest management expert. You MUST use the web_search tool to search for accurate, specific information about this pest before answering. Search for its scientific name, life cycle, damage it causes, and specific IPM control methods including pesticide names and dosages.";
+      userPrompt = `Search the web for comprehensive information about the pest: "${query}".
+Search for: its scientific name, pest type, crops it attacks, specific damage it causes, life stages, peak activity periods, economic threshold, and specific IPM control measures with pesticide names and rates.
+After searching, return ONLY valid JSON (no markdown, no extra text):
+{"pestName":"","scientificName":"specific scientific name","pestType":"insect|mite|nematode|rodent|mollusk|bird","affectedPlants":["specific crop 1","specific crop 2"],"damageDescription":"specific damage description from search","lifeStages":["specific stage 1","specific stage 2","specific stage 3"],"peakActivity":"specific season/conditions","economicThreshold":"specific threshold value","control":{"cultural":["specific practice 1","specific practice 2"],"biological":["specific natural enemy 1 - how to use","specific agent 2"],"mechanical":["specific trap type","specific barrier"],"chemical":["specific pesticide name - specific dosage","specific pesticide 2 - rate"],"ipmSummary":"specific integrated pest management strategy for this pest"},"safetyNotes":"specific safety precautions"}`;
     }
 
-    // Try Claude API first, fall back to built-in data if anything fails
+    // Try Claude with web search tool
     try {
       const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
@@ -360,38 +306,44 @@ Return ONLY valid JSON (no markdown, no extra text):
         },
         body: JSON.stringify({
           model: "claude-haiku-4-5",
-          max_tokens: 1500,
-          messages: [{ role: "user", content: prompt }]
+          max_tokens: 2000,
+          system: systemPrompt,
+          tools: [{ type: "web_search_20250305", name: "web_search" }],
+          messages: [{ role: "user", content: userPrompt }]
         })
       });
 
       if (claudeRes.ok) {
         const claudeData = await claudeRes.json();
-        const rawText = claudeData.content.map(b => b.text || "").join("");
-        const clean = rawText.replace(/```json|```/g, "").trim();
-        try {
-          const parsed = JSON.parse(clean);
-          console.log("✅ Claude API succeeded for:", query);
-          return res.json({ success: true, source: "claude", data: parsed });
-        } catch (e) {
-          console.log("⚠️ Claude JSON parse failed, using fallback");
+        // Extract the final text block (after tool use)
+        const textBlocks = claudeData.content.filter(b => b.type === "text");
+        if (textBlocks.length > 0) {
+          const rawText = textBlocks.map(b => b.text || "").join("");
+          const clean = rawText.replace(/```json|```/g, "").trim();
+          try {
+            const parsed = JSON.parse(clean);
+            console.log("✅ Claude web search succeeded for:", query);
+            return res.json({ success: true, source: "claude-search", data: parsed });
+          } catch (e) {
+            console.log("⚠️ Claude JSON parse failed:", e.message);
+            console.log("Raw text was:", rawText.substring(0, 300));
+          }
         }
       } else {
-        console.log("⚠️ Claude API returned", claudeRes.status, "— using fallback");
+        const errText = await claudeRes.text();
+        console.log("⚠️ Claude API returned", claudeRes.status, errText.substring(0, 200));
       }
     } catch (e) {
-      console.log("⚠️ Claude API unreachable:", e.message, "— using fallback");
+      console.log("⚠️ Claude API error:", e.message);
     }
 
-    // Fallback: return built-in data
-    const fallback = buildFallback(query, type);
-    return res.json({ success: true, source: "fallback", data: fallback });
+    // Fallback — never return 500
+    console.log("Using built-in fallback for:", query);
+    return res.json({ success: true, source: "fallback", data: buildFallback(query, type) });
 
   } catch (err) {
-    // Last resort fallback — never return 500
     try {
-      const fallback = buildFallback(req.body.query || "Unknown", req.body.type || "plant");
-      return res.json({ success: true, source: "fallback", data: fallback });
+      return res.json({ success: true, source: "fallback", data: buildFallback(req.body.query || "Unknown", req.body.type || "plant") });
     } catch(e2) {
       res.status(500).json({ success: false, error: err.message });
     }
