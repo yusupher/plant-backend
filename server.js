@@ -11,13 +11,18 @@ app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
 // ==============================
-// KEYS (YOUR REAL KEYS)
+// KEYS (USE ENVIRONMENT VARIABLES)
 // ==============================
 const PLANTNET_KEY = "2b104s5nNyqRjHHyiCJveuBwu";
 const ROBOFLOW_KEY = "33LnNNZCWrWy3FQGulD9";
 const ROBOFLOW_MODEL = "plant-dataset-ypln5-to68g/1";
 const PEST_MODEL = "insect-e746x-iuclt/1";
-const ANTHROPIC_KEY = "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";
+// ✅ IMPORTANT: Anthropic key from Render environment (never hardcode)
+const ANTHROPIC_KEY = process.env.ANTHROPIC_KEY;
+
+if (!ANTHROPIC_KEY) {
+  console.error("❌ ANTHROPIC_KEY environment variable not set!");
+}
 
 // ==============================
 // HEALTH CHECK
@@ -78,7 +83,7 @@ app.post("/disease", upload.single("image"), async (req, res) => {
     const base64 = req.file.buffer.toString("base64");
 
     // ==========================
-    // 1. ROBOFLOW (FIXED SERVERLESS)
+    // 1. ROBOFLOW
     // ==========================
     try {
       const rfUrl = `https://serverless.roboflow.com/${ROBOFLOW_MODEL}?api_key=${ROBOFLOW_KEY}`;
@@ -112,7 +117,7 @@ app.post("/disease", upload.single("image"), async (req, res) => {
     }
 
     // ==========================
-    // 2. PLANT.ID SAFE FALLBACK
+    // 2. PLANT.ID FALLBACK
     // ==========================
     try {
       const plantRes = await fetch(
@@ -209,26 +214,8 @@ app.post("/detect-pest", upload.single("image"), async (req, res) => {
 });
 
 // ==============================
-// 🤖 CLAUDE AI COMPREHENSIVE INFO (FIXED)
+// 🤖 CLAUDE AI COMPREHENSIVE INFO (USES ENV KEY)
 // ==============================
-
-function isGenericData(data, type) {
-  const genericPhrases = [
-    "consult nutritional databases", "widespread across africa", "tropical/subtropical",
-    "detailed information could not be retrieved", "economically important in",
-    "plays a role in local ecosystems", "well-drained loamy soil", "unknown pathogen",
-    "various crop plants", "causes physical damage", "most active during warm",
-    "act when 10–15%", "wear ppe when applying", "combined with fallback"
-  ];
-  const str = JSON.stringify(data).toLowerCase();
-  for (let phrase of genericPhrases) {
-    if (str.includes(phrase)) return true;
-  }
-  if (type === "plant" && data.scientificName === data.commonName) return true;
-  if (type === "disease" && data.pathogenName === "Unknown pathogen") return true;
-  if (type === "pest" && data.scientificName === "Unknown species") return true;
-  return false;
-}
 
 app.post("/claude-info", async (req, res) => {
   try {
@@ -236,14 +223,17 @@ app.post("/claude-info", async (req, res) => {
     if (!query || !type) return res.status(400).json({ success: false, error: "Missing query or type" });
     if (!["plant", "disease", "pest"].includes(type)) return res.status(400).json({ success: false, error: "Invalid type" });
 
+    // Check if Anthropic key is available
+    if (!ANTHROPIC_KEY) {
+      return res.json({ success: false, error: "Anthropic API key not configured on server." });
+    }
+
     let systemPrompt = "";
     let userPrompt = "";
 
     if (type === "plant") {
-      systemPrompt = `You are a professional botanist. Use the web search tool to find specific, real information about the plant "${query}". 
-Return ONLY valid JSON with no extra text. Do not use generic placeholders.`;
-      userPrompt = `Search the web for specific information about the plant: "${query}".
-Return JSON exactly like this:
+      systemPrompt = `You are a professional botanist. Answer based on your knowledge. Return ONLY valid JSON, no extra text. Use specific, factual information.`;
+      userPrompt = `Provide comprehensive information about the plant "${query}" in this exact JSON format:
 {
   "commonName": "",
   "scientificName": "",
@@ -252,10 +242,10 @@ Return JSON exactly like this:
   "kingdom": "Plantae",
   "class": "",
   "category": "crop|tree|weed|shrub|herb|grass",
-  "origin": "specific country/region",
-  "description": "3-4 specific sentences",
-  "uses": ["use1","use2","use3","use4"],
-  "nutritionalValue": "nutritional info or null",
+  "origin": "specific region",
+  "description": "3-4 detailed sentences",
+  "uses": ["use1", "use2", "use3", "use4"],
+  "nutritionalValue": "nutritional facts if edible, else null",
   "economicImportance": "economic data",
   "ecologicalRole": "role in ecosystem",
   "growingConditions": {
@@ -266,49 +256,50 @@ Return JSON exactly like this:
   },
   "isWeed": false,
   "weedControl": null,
-  "interestingFacts": ["fact1","fact2","fact3"]
-}`;
+  "interestingFacts": ["fact1", "fact2", "fact3"]
+}
+Be specific. Do not use placeholders like "various" or "some".`;
     } else if (type === "disease") {
-      systemPrompt = "You are a plant pathologist. Use web search to find specific information about the disease. Return ONLY valid JSON.";
-      userPrompt = `Search for the plant disease: "${query}". Return JSON:
+      systemPrompt = `You are a plant pathologist. Return ONLY valid JSON with specific information.`;
+      userPrompt = `Provide information about the plant disease "${query}" in this JSON:
 {
   "diseaseName": "",
   "pathogenType": "fungal|bacterial|viral|nematode|physiological",
   "pathogenName": "scientific name",
-  "affectedPlants": ["crop1","crop2"],
-  "symptoms": ["symptom1","symptom2","symptom3","symptom4"],
+  "affectedPlants": ["crop1", "crop2"],
+  "symptoms": ["symptom1", "symptom2", "symptom3", "symptom4"],
   "spreadMechanism": "how it spreads",
-  "favorableConditions": "temp, humidity",
-  "economicImpact": "% loss or $",
+  "favorableConditions": "temp, humidity, etc.",
+  "economicImpact": "yield loss % or $",
   "control": {
-    "cultural": ["practice1","practice2"],
-    "biological": ["agent - how to apply"],
+    "cultural": ["practice1", "practice2"],
+    "biological": ["agent - application"],
     "chemical": ["fungicide - dosage"],
     "resistant_varieties": ["variety"],
     "ipmSummary": "integrated strategy"
   },
-  "preventionTips": ["tip1","tip2","tip3"]
+  "preventionTips": ["tip1", "tip2", "tip3"]
 }`;
     } else { // pest
-      systemPrompt = "You are an entomologist. Use web search to find specific information about the pest. Return ONLY valid JSON.";
-      userPrompt = `Search for the pest: "${query}". Return JSON:
+      systemPrompt = `You are an entomologist. Return ONLY valid JSON with specific information.`;
+      userPrompt = `Provide information about the pest "${query}" in this JSON:
 {
   "pestName": "",
   "scientificName": "",
   "pestType": "insect|mite|nematode|rodent|mollusk|bird",
-  "affectedPlants": ["crop1","crop2"],
-  "damageDescription": "specific damage",
-  "lifeStages": ["egg","larva","pupa","adult"],
+  "affectedPlants": ["crop1", "crop2"],
+  "damageDescription": "detailed damage description",
+  "lifeStages": ["egg", "larva", "pupa", "adult"],
   "peakActivity": "season/conditions",
   "economicThreshold": "e.g., 5 per plant",
   "control": {
-    "cultural": ["practice1","practice2"],
+    "cultural": ["practice1", "practice2"],
     "biological": ["enemy - application"],
     "mechanical": ["trap type"],
     "chemical": ["pesticide - dosage"],
     "ipmSummary": "integrated strategy"
   },
-  "safetyNotes": "PPE or PHI"
+  "safetyNotes": "PPE or pre-harvest interval"
 }`;
     }
 
@@ -324,15 +315,13 @@ Return JSON exactly like this:
           model: "claude-3-haiku-20240307",
           max_tokens: 2000,
           system: systemPrompt,
-          tools: [{ type: "web_search", name: "web_search" }],
-          tool_choice: { type: "auto" },
           messages: [{ role: "user", content: userPrompt }]
         })
       });
 
       if (!response.ok) {
         const errText = await response.text();
-        console.log(`Claude error ${response.status}:`, errText.substring(0, 200));
+        console.log(`Claude API error ${response.status}:`, errText.substring(0, 200));
         return null;
       }
 
@@ -344,13 +333,12 @@ Return JSON exactly like this:
       const clean = raw.replace(/```json|```/g, "").trim();
       try {
         const parsed = JSON.parse(clean);
-        if (type === "plant" && (!parsed.commonName && !parsed.scientificName)) return null;
+        if (type === "plant" && !parsed.commonName && !parsed.scientificName) return null;
         if (type === "disease" && !parsed.diseaseName) return null;
         if (type === "pest" && !parsed.pestName) return null;
-        if (isGenericData(parsed, type)) return null;
         return parsed;
       } catch (e) {
-        console.log("JSON parse error:", e.message);
+        console.log("JSON parse error:", e.message, "Raw:", raw.substring(0, 200));
         return null;
       }
     }
@@ -364,12 +352,11 @@ Return JSON exactly like this:
     }
 
     if (finalData) {
-      return res.json({ success: true, source: "claude-search", data: finalData });
+      return res.json({ success: true, source: "claude", data: finalData });
     } else {
-      // Return 200 with error flag (no 404)
       return res.json({
         success: false,
-        error: `Could not retrieve specific information for "${query}". Try a more precise name.`
+        error: `Could not retrieve information for "${query}". Try a more precise name.`
       });
     }
   } catch (err) {
