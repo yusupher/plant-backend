@@ -11,7 +11,7 @@ app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
 // ==============================
-// KEYS (USE ENVIRONMENT VARIABLES)
+// KEYS
 // ==============================
 const PLANTNET_KEY = "2b104s5nNyqRjHHyiCJveuBwu";
 const ROBOFLOW_KEY = "33LnNNZCWrWy3FQGulD9";
@@ -23,9 +23,6 @@ if (!ANTHROPIC_API_KEY) {
   console.error("❌ ANTHROPIC_API_KEY environment variable not set!");
 }
 
-// ==============================
-// HEALTH CHECK
-// ==============================
 app.get("/", (req, res) => {
   res.json({
     status: "Plant AI Backend Running 🚀",
@@ -34,85 +31,48 @@ app.get("/", (req, res) => {
 });
 
 // ==============================
-// 🌿 PLANT IDENTIFICATION
+// PLANT IDENTIFICATION (unchanged)
 // ==============================
 app.post("/identify", upload.single("image"), async (req, res) => {
   try {
-    if (!req.file)
-      return res.status(400).json({ success: false, error: "No image uploaded" });
-
+    if (!req.file) return res.status(400).json({ success: false, error: "No image uploaded" });
     const form = new FormData();
-    form.append("images", req.file.buffer, {
-      filename: "plant.jpg",
-      contentType: "image/jpeg"
+    form.append("images", req.file.buffer, { filename: "plant.jpg", contentType: "image/jpeg" });
+    const response = await fetch(`https://my-api.plantnet.org/v2/identify/all?api-key=${PLANTNET_KEY}`, {
+      method: "POST", body: form, headers: form.getHeaders()
     });
-
-    const response = await fetch(
-      `https://my-api.plantnet.org/v2/identify/all?api-key=${PLANTNET_KEY}`,
-      {
-        method: "POST",
-        body: form,
-        headers: form.getHeaders()
-      }
-    );
-
     const data = await response.json();
-
-    res.json({
-      success: true,
-      source: "PlantNet",
-      data
-    });
+    res.json({ success: true, source: "PlantNet", data });
   } catch (err) {
-    res.status(500).json({
-      success: false,
-      error: err.message
-    });
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
 // ==============================
-// 🦠 DISEASE DETECTION (ROBUST)
+// DISEASE DETECTION (unchanged)
 // ==============================
 app.post("/disease", upload.single("image"), async (req, res) => {
   try {
-    if (!req.file)
-      return res.status(400).json({ success: false, error: "No image uploaded" });
-
+    if (!req.file) return res.status(400).json({ success: false, error: "No image uploaded" });
     const base64 = req.file.buffer.toString("base64");
-
     try {
       const rfUrl = `https://serverless.roboflow.com/${ROBOFLOW_MODEL}?api_key=${ROBOFLOW_KEY}`;
-      const rfRes = await fetch(rfUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: base64
-      });
+      const rfRes = await fetch(rfUrl, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: base64 });
       const rfText = await rfRes.text();
       let rfData;
       try { rfData = JSON.parse(rfText); } catch { rfData = { raw: rfText }; }
-      if (rfData && !rfData.error) {
-        return res.json({ success: true, source: "Roboflow", data: rfData });
-      }
-    } catch (err) {
-      console.log("Roboflow failed:", err.message);
-    }
-
+      if (rfData && !rfData.error) return res.json({ success: true, source: "Roboflow", data: rfData });
+    } catch (err) { console.log("Roboflow failed:", err.message); }
     try {
       const plantRes = await fetch("https://api.plant.id/v3/health_assessment", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Api-Key": "PUT_YOUR_PLANT_ID_KEY_HERE"
-        },
+        headers: { "Content-Type": "application/json", "Api-Key": "PUT_YOUR_PLANT_ID_KEY_HERE" },
         body: JSON.stringify({ images: [{ image: base64 }], health: "only" })
       });
       const text = await plantRes.text();
       let plantData;
       try { plantData = JSON.parse(text); } catch { plantData = null; }
-      if (plantData) {
-        return res.json({ success: true, source: "Plant.id (fallback)", data: plantData });
-      }
+      if (plantData) return res.json({ success: true, source: "Plant.id (fallback)", data: plantData });
       return res.json({ success: false, source: "Plant.id", error: "Invalid response", raw: text });
     } catch (err) {
       return res.json({ success: false, source: "Plant.id", error: err.message });
@@ -123,31 +83,20 @@ app.post("/disease", upload.single("image"), async (req, res) => {
 });
 
 // ==============================
-// 🐛 PEST DETECTION
+// PEST DETECTION (unchanged)
 // ==============================
 app.post("/detect-pest", upload.single("image"), async (req, res) => {
   try {
-    if (!req.file)
-      return res.status(400).json({ success: false, error: "No image uploaded" });
-
+    if (!req.file) return res.status(400).json({ success: false, error: "No image uploaded" });
     const base64 = req.file.buffer.toString("base64");
     const rfUrl = `https://serverless.roboflow.com/${PEST_MODEL}?api_key=${ROBOFLOW_KEY}`;
-    const rfRes = await fetch(rfUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: base64
-    });
+    const rfRes = await fetch(rfUrl, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: base64 });
     const rfText = await rfRes.text();
     let rfData;
     try { rfData = JSON.parse(rfText); } catch { rfData = { raw: rfText }; }
-
     if (rfData && rfData.predictions && rfData.predictions.length > 0) {
       const top = rfData.predictions.reduce((max, p) => p.confidence > max.confidence ? p : max, rfData.predictions[0]);
-      return res.json({
-        success: true,
-        result: top.class || "Unknown pest",
-        confidence: Math.round(top.confidence * 100)
-      });
+      return res.json({ success: true, result: top.class || "Unknown pest", confidence: Math.round(top.confidence * 100) });
     }
     return res.json({ success: true, result: "No pest detected", confidence: 0 });
   } catch (err) {
@@ -156,9 +105,8 @@ app.post("/detect-pest", upload.single("image"), async (req, res) => {
 });
 
 // ==============================
-// 🤖 CLAUDE AI COMPREHENSIVE INFO (WITH CORRECT MODEL)
+// 🤖 CLAUDE INFO – FIXED MODEL
 // ==============================
-
 app.post("/claude-info", async (req, res) => {
   try {
     const { query, type } = req.body;
@@ -238,7 +186,7 @@ app.post("/claude-info", async (req, res) => {
     }
 
     async function callClaude() {
-      // ✅ CORRECTED MODEL NAME
+      // ✅ Using the reliable model available to most keys
       const response = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: {
@@ -247,7 +195,7 @@ app.post("/claude-info", async (req, res) => {
           "anthropic-version": "2023-06-01"
         },
         body: JSON.stringify({
-          model: "claude-3-5-haiku-20241022",  // <-- FIXED: valid model name
+          model: "claude-3-haiku-20240307",
           max_tokens: 2000,
           system: systemPrompt,
           messages: [{ role: "user", content: userPrompt }]
@@ -294,7 +242,7 @@ app.post("/claude-info", async (req, res) => {
     if (finalResult) {
       return res.json({ success: true, source: "claude", data: finalResult });
     } else {
-      return res.json({ success: false, error: lastError || `Could not retrieve information for "${query}". Try a more precise name.` });
+      return res.json({ success: false, error: lastError || `Could not retrieve information for "${query}".` });
     }
   } catch (err) {
     console.error("Claude endpoint error:", err);
@@ -302,8 +250,5 @@ app.post("/claude-info", async (req, res) => {
   }
 });
 
-// ==============================
-// START SERVER
-// ==============================
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log("🚀 Plant AI running on port", PORT));
