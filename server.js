@@ -16,6 +16,7 @@ app.use(express.json({ limit: "10mb" }));
 const PLANTNET_KEY = "2b104s5nNyqRjHHyiCJveuBwu";
 const ROBOFLOW_KEY = "33LnNNZCWrWy3FQGulD9";
 const ROBOFLOW_MODEL = "plant-dataset-ypln5-to68g/1";
+const PEST_MODEL = "insect-e746x-iuclt/1";
 const ANTHROPIC_KEY = "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";
 
 // ==============================
@@ -162,6 +163,48 @@ app.post("/disease", upload.single("image"), async (req, res) => {
       success: false,
       error: err.message
     });
+  }
+});
+
+// ==============================
+// 🐛 PEST DETECTION
+// ==============================
+app.post("/detect-pest", upload.single("image"), async (req, res) => {
+  try {
+    if (!req.file)
+      return res.status(400).json({ success: false, error: "No image uploaded" });
+
+    const base64 = req.file.buffer.toString("base64");
+
+    const rfUrl = `https://serverless.roboflow.com/${PEST_MODEL}?api_key=${ROBOFLOW_KEY}`;
+
+    const rfRes = await fetch(rfUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: base64
+    });
+
+    const rfText = await rfRes.text();
+    let rfData;
+    try { rfData = JSON.parse(rfText); } catch { rfData = { raw: rfText }; }
+
+    if (rfData && rfData.predictions && rfData.predictions.length > 0) {
+      const top = rfData.predictions.reduce((max, p) => p.confidence > max.confidence ? p : max, rfData.predictions[0]);
+      return res.json({
+        success: true,
+        result: top.class || "Unknown pest",
+        confidence: Math.round(top.confidence * 100)
+      });
+    }
+
+    return res.json({
+      success: true,
+      result: "No pest detected",
+      confidence: 0
+    });
+
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
