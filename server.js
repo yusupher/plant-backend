@@ -7,27 +7,35 @@ const FormData = require("form-data");
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 
-app.use(cors());
+/* =========================
+   ✅ FIXED CORS (IMPORTANT)
+========================= */
+app.use(cors({
+  origin: "*",
+  methods: ["GET", "POST"],
+  allowedHeaders: ["Content-Type"]
+}));
+
 app.use(express.json({ limit: "10mb" }));
 
-// ==============================
-// 🔑 ENV KEYS (RENDER)
-// ==============================
+/* =========================
+   🔑 ENV KEYS (RENDER)
+========================= */
 const PLANTNET_KEY = process.env.PLANTNET_KEY;
 const ROBOFLOW_KEY = process.env.ROBOFLOW_KEY;
 const PLANT_ID_KEY = process.env.PLANT_ID_KEY;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
-// ==============================
-// 🤖 MODELS
-// ==============================
-const ROBOFLOW_PLANT_MODEL = "plant-dataset-ypln5-to68g/1";
-const ROBOFLOW_DISEASE_MODEL = "plant-disease-xqd8b-tvz68/1";
-const ROBOFLOW_INSECT_MODEL = "insect-e746x-iuclt/1";
+/* =========================
+   🤖 MODELS
+========================= */
+const PLANT_MODEL = "plant-dataset-ypln5-to68g/1";
+const DISEASE_MODEL = "plant-disease-xqd8b-tvz68/1";
+const INSECT_MODEL = "insect-e746x-iuclt/1";
 
-// ==============================
-// 🟢 HEALTH CHECK
-// ==============================
+/* =========================
+   🟢 HEALTH CHECK
+========================= */
 app.get("/", (req, res) => {
   res.json({
     status: "🌿 Smart Farm AI Backend Running",
@@ -41,11 +49,11 @@ app.get("/", (req, res) => {
   });
 });
 
-// ==============================
-// 🔥 ROBOFLOW HELPER (FIXED)
-// ==============================
+/* =========================
+   🔥 ROBOFLOW HELPER
+========================= */
 async function runRoboflow(model, base64) {
-  const url = `https://detect.roboflow.com/${model}?api_key=${ROBOFLOW_KEY}`;
+  const url = `https://serverless.roboflow.com/${model}?api_key=${ROBOFLOW_KEY}`;
 
   try {
     const res = await fetch(url, {
@@ -68,11 +76,13 @@ async function runRoboflow(model, base64) {
   }
 }
 
-// ==============================
-// 🌿 PLANT IDENTIFICATION (PlantNet)
-// ==============================
+/* =========================
+   🌿 PLANT IDENTIFICATION
+========================= */
 app.post("/identify", upload.single("image"), async (req, res) => {
   try {
+    if (!req.file) return res.status(400).json({ error: "No image uploaded" });
+
     const form = new FormData();
     form.append("images", req.file.buffer, {
       filename: "plant.jpg",
@@ -81,36 +91,30 @@ app.post("/identify", upload.single("image"), async (req, res) => {
 
     const response = await fetch(
       `https://my-api.plantnet.org/v2/identify/all?api-key=${PLANTNET_KEY}`,
-      {
-        method: "POST",
-        body: form,
-        headers: form.getHeaders()
-      }
+      { method: "POST", body: form, headers: form.getHeaders() }
     );
 
     const data = await response.json();
 
-    res.json({
-      success: true,
-      source: "PlantNet",
-      data
-    });
+    res.json({ success: true, source: "PlantNet", data });
 
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// ==============================
-// 🦠 DISEASE DETECTION
-// ==============================
+/* =========================
+   🦠 DISEASE DETECTION
+========================= */
 app.post("/disease", upload.single("image"), async (req, res) => {
   try {
+    if (!req.file) return res.status(400).json({ error: "No image uploaded" });
+
     const base64 = req.file.buffer.toString("base64");
 
-    const rf = await runRoboflow(ROBOFLOW_DISEASE_MODEL, base64);
+    const rf = await runRoboflow(DISEASE_MODEL, base64);
 
-    if (rf.predictions) {
+    if (!rf.error && rf.predictions) {
       return res.json({
         success: true,
         source: "Roboflow",
@@ -118,6 +122,7 @@ app.post("/disease", upload.single("image"), async (req, res) => {
       });
     }
 
+    // fallback Plant.id
     const plantRes = await fetch(
       "https://api.plant.id/v3/health_assessment",
       {
@@ -146,18 +151,28 @@ app.post("/disease", upload.single("image"), async (req, res) => {
   }
 });
 
-// ==============================
-// 🐛 INSECT DETECTION
-// ==============================
+/* =========================
+   🐛 INSECT DETECTION
+========================= */
 app.post("/detect-insect", upload.single("image"), async (req, res) => {
   try {
+    if (!req.file) return res.status(400).json({ error: "No image uploaded" });
+
     const base64 = req.file.buffer.toString("base64");
 
-    const rf = await runRoboflow(ROBOFLOW_INSECT_MODEL, base64);
+    const rf = await runRoboflow(INSECT_MODEL, base64);
+
+    if (rf.error) {
+      return res.json({
+        success: false,
+        error: rf.error,
+        raw: rf
+      });
+    }
 
     let best = null;
 
-    if (rf.predictions && rf.predictions.length > 0) {
+    if (rf.predictions?.length > 0) {
       best = rf.predictions.reduce((a, b) =>
         b.confidence > a.confidence ? b : a
       );
@@ -165,7 +180,6 @@ app.post("/detect-insect", upload.single("image"), async (req, res) => {
 
     res.json({
       success: true,
-      type: "insect",
       result: best ? best.class : "No insect detected",
       confidence: best ? Math.round(best.confidence * 100) : 0,
       raw: rf
@@ -176,18 +190,16 @@ app.post("/detect-insect", upload.single("image"), async (req, res) => {
   }
 });
 
-// ==============================
-// 🔥 ANALYZE ALL (BEST TEST ROUTE)
-// ==============================
+/* =========================
+   🌾 COMBINE ANALYSIS (OPTIONAL)
+========================= */
 app.post("/analyze-all", upload.single("image"), async (req, res) => {
   try {
     const base64 = req.file.buffer.toString("base64");
 
-    const [plant, disease, insect] = await Promise.all([
-      runRoboflow(ROBOFLOW_PLANT_MODEL, base64),
-      runRoboflow(ROBOFLOW_DISEASE_MODEL, base64),
-      runRoboflow(ROBOFLOW_INSECT_MODEL, base64)
-    ]);
+    const plant = await runRoboflow(PLANT_MODEL, base64);
+    const disease = await runRoboflow(DISEASE_MODEL, base64);
+    const insect = await runRoboflow(INSECT_MODEL, base64);
 
     res.json({
       success: true,
@@ -201,9 +213,9 @@ app.post("/analyze-all", upload.single("image"), async (req, res) => {
   }
 });
 
-// ==============================
-// 🤖 AI INFO (CLAUDE)
-// ==============================
+/* =========================
+   🤖 AI INFO (CLAUDE)
+========================= */
 app.post("/comprehensive-info", async (req, res) => {
   try {
     const { query, type } = req.body;
@@ -226,7 +238,7 @@ app.post("/comprehensive-info", async (req, res) => {
 
     const data = await response.json();
 
-    const text = data.content?.[0]?.text || "";
+    const text = data.content?.map(b => b.text).join("") || "";
 
     try {
       res.json(JSON.parse(text));
@@ -239,9 +251,9 @@ app.post("/comprehensive-info", async (req, res) => {
   }
 });
 
-// ==============================
-// 🚀 START SERVER
-// ==============================
+/* =========================
+   🚀 START SERVER
+========================= */
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
