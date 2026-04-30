@@ -210,57 +210,27 @@ app.post("/detect-pest", upload.single("image"), async (req, res) => {
 
 // ==============================
 // 🤖 CLAUDE AI COMPREHENSIVE INFO
-// (web search powered — real results)
+// (Specific, search‑based, no generic fallback)
 // ==============================
 
-function buildFallback(query, type) {
-  if (type === "plant") {
-    return {
-      commonName: query, scientificName: query, family: "—", order: "—",
-      kingdom: "Plantae", class: "—", category: "crop", origin: "Tropical/Subtropical regions",
-      description: `${query} is a plant species. Detailed information could not be retrieved at this time.`,
-      uses: ["Food production", "Traditional medicine", "Agricultural use"],
-      nutritionalValue: "Consult nutritional databases for specifics.",
-      economicImportance: "Economically important in tropical and subtropical farming systems.",
-      ecologicalRole: "Plays a role in local ecosystems and agricultural biodiversity.",
-      growingConditions: { climate: "Tropical to subtropical", soil: "Well-drained loamy soil", rainfall: "500–1500mm/year", temperature: "18–35°C" },
-      isWeed: false, weedControl: null,
-      interestingFacts: ["Widely cultivated across Africa and Asia.", "Important for food security in developing regions."]
-    };
-  } else if (type === "disease") {
-    return {
-      diseaseName: query, pathogenType: "fungal", pathogenName: "Unknown pathogen",
-      affectedPlants: ["Various crop plants"],
-      symptoms: ["Leaf discoloration or spotting", "Wilting or stunted growth", "Lesions on stem or fruit", "Premature leaf drop"],
-      spreadMechanism: "Spreads through infected plant material, wind, water splash, and contaminated tools.",
-      favorableConditions: "High humidity, warm temperatures, and poor air circulation.",
-      economicImpact: "Can cause significant yield losses if not managed early.",
-      control: {
-        cultural: ["Remove and destroy infected material", "Rotate crops", "Avoid overhead irrigation", "Use certified disease-free seeds"],
-        biological: ["Trichoderma spp. — soil drench or foliar spray", "Bacillus subtilis-based biocontrol products"],
-        chemical: ["Mancozeb 80WP — 2.5g/L, spray every 7–14 days", "Copper oxychloride — 3g/L as preventive spray"],
-        resistant_varieties: ["Use locally recommended resistant varieties"],
-        ipmSummary: "Combine cultural practices, biological agents, and targeted chemical application only when disease pressure is high."
-      },
-      preventionTips: ["Inspect plants regularly", "Maintain field hygiene", "Use certified seed and resistant varieties", "Avoid working in wet fields"]
-    };
-  } else {
-    return {
-      pestName: query, scientificName: "Unknown species", pestType: "insect",
-      affectedPlants: ["Various crop plants"],
-      damageDescription: "Causes physical damage to leaves, stems, roots, or fruits reducing yield and plant vigor.",
-      lifeStages: ["Egg", "Larva/Nymph", "Adult"], peakActivity: "Most active during warm, humid seasons.",
-      economicThreshold: "Act when 10–15% of plants show visible damage or >5 pests per plant.",
-      control: {
-        cultural: ["Crop rotation", "Deep ploughing to expose pupae", "Intercropping", "Remove crop residues"],
-        biological: ["Encourage natural predators — ladybirds, lacewings, parasitic wasps", "Apply Beauveria bassiana or Metarhizium", "Neem-based biopesticides (Azadirachtin)"],
-        mechanical: ["Yellow sticky traps", "Hand-picking of larvae", "Insect nets or row covers"],
-        chemical: ["Cypermethrin 10EC — 10ml/L, spray at early infestation", "Lambda-cyhalothrin — 5ml/L for severe outbreaks"],
-        ipmSummary: "Start with cultural controls, introduce biological agents early, use chemicals only as last resort when populations exceed economic thresholds."
-      },
-      safetyNotes: "Wear PPE when applying pesticides. Observe pre-harvest intervals. Store chemicals safely away from children and food."
-    };
+// Helper: check if parsed JSON looks generic (contains placeholder phrases)
+function isGenericData(data, type) {
+  const genericPhrases = [
+    "consult nutritional databases", "widespread across africa", "tropical/subtropical",
+    "detailed information could not be retrieved", "economically important in",
+    "plays a role in local ecosystems", "well-drained loamy soil", "unknown pathogen",
+    "various crop plants", "causes physical damage", "most active during warm",
+    "act when 10–15%", "wear ppe when applying", "combined with fallback"
+  ];
+  const str = JSON.stringify(data).toLowerCase();
+  for (let phrase of genericPhrases) {
+    if (str.includes(phrase)) return true;
   }
+  // Additional plant‑specific generic check
+  if (type === "plant" && data.scientificName === data.commonName) return true;
+  if (type === "disease" && data.pathogenName === "Unknown pathogen") return true;
+  if (type === "pest" && data.scientificName === "Unknown species") return true;
+  return false;
 }
 
 app.post("/claude-info", async (req, res) => {
@@ -273,30 +243,125 @@ app.post("/claude-info", async (req, res) => {
     let userPrompt = "";
 
     if (type === "plant") {
-      systemPrompt = "You are a professional botanist and agronomist. You MUST use the web_search tool to search for accurate, specific information about the plant before answering. Search for its scientific classification, uses, growing conditions, and if it is a weed, its IPM control methods. Base your answer entirely on search results, not generic knowledge.";
-      userPrompt = `Search the web for comprehensive information about the plant: "${query}". 
-Search for: its scientific name, family, classification (crop/tree/weed), origin, uses, nutritional value, economic importance, growing conditions, and if it is a weed its full IPM control methods.
-After searching, return ONLY valid JSON (no markdown, no extra text):
-{"commonName":"","scientificName":"","family":"","order":"","kingdom":"Plantae","class":"","category":"crop|tree|weed|shrub|herb|grass","origin":"","description":"3-4 specific sentences from search results","uses":["specific use 1","specific use 2","specific use 3","specific use 4"],"nutritionalValue":"specific nutritional info or null","economicImportance":"specific economic data","ecologicalRole":"","growingConditions":{"climate":"","soil":"","rainfall":"","temperature":""},"isWeed":false,"weedControl":null,"interestingFacts":["specific fact 1","specific fact 2","specific fact 3"]}
-If weed, set isWeed:true and weedControl:{"cultural":["specific method"],"mechanical":["specific method"],"biological":["specific agent and how"],"chemical":["specific herbicide name - specific dosage"],"ipmSummary":"specific IPM strategy for this exact weed"}`;
+      systemPrompt = `You are a professional botanist and agronomist. You MUST use the web_search tool to find SPECIFIC, REAL information about the plant "${query}". 
+- Do NOT use generic placeholders like "tropical/subtropical", "well-drained loamy soil", "consult nutritional databases".
+- If the plant is a weed, set "category":"weed" and "isWeed":true, and provide detailed, practical weed control methods (cultural, mechanical, biological, chemical with specific herbicide names and rates).
+- For crops/trees/herbs, provide real nutritional values, economic data, and growing conditions from authoritative sources (FAO, USDA, research papers).
+- Return ONLY valid JSON, no markdown, no extra text.`;
+
+      userPrompt = `Search the web for comprehensive, SPECIFIC information about the plant: "${query}".
+Search for its scientific name, family, classification (weed/crop/tree/shrub/herb/grass), origin, detailed uses (not generic), real nutritional composition (if edible), economic importance (e.g., production volumes, market value), ecological role, and growing conditions with actual numbers (rainfall mm, temperature °C).
+If it is a WEED, you MUST include:
+- "isWeed": true, "category": "weed"
+- weedControl object with specific methods:
+  - cultural: ["crop rotation with ...", "cover cropping with ..."]
+  - mechanical: ["hand pulling at growth stage", "mowing height X cm"]
+  - biological: ["specific agent name and application method"]
+  - chemical: ["herbicide name - dosage (g or ml per hectare)"]
+  - ipmSummary: "Integrated strategy combining ..."
+If it is NOT a weed, set isWeed:false, weedControl:null.
+
+Return ONLY valid JSON (no extra text):
+{
+  "commonName": "",
+  "scientificName": "",
+  "family": "",
+  "order": "",
+  "kingdom": "Plantae",
+  "class": "",
+  "category": "weed|crop|tree|shrub|herb|grass",
+  "origin": "specific country/region",
+  "description": "3-4 specific sentences from search",
+  "uses": ["specific use 1", "specific use 2", "specific use 3", "specific use 4"],
+  "nutritionalValue": "specific per 100g values or null",
+  "economicImportance": "specific data (e.g., 'Global production 50M tonnes, value $10B')",
+  "ecologicalRole": "specific role (host plant, nitrogen fixer, etc.)",
+  "growingConditions": {
+    "climate": "specific (e.g., 'Köppen Aw', 'Mediterranean')",
+    "soil": "specific texture/pH",
+    "rainfall": "e.g., '800-1200 mm/year'",
+    "temperature": "e.g., '15-28°C'"
+  },
+  "isWeed": false,
+  "weedControl": null,
+  "interestingFacts": ["specific fact 1", "specific fact 2", "specific fact 3"]
+}`;
 
     } else if (type === "disease") {
-      systemPrompt = "You are a plant pathologist. You MUST use the web_search tool to search for accurate, specific information about this plant disease before answering. Search for the pathogen name, symptoms, spread, and specific control measures including fungicide/bactericide names and dosages.";
-      userPrompt = `Search the web for comprehensive information about the plant disease: "${query}".
-Search for: its causal pathogen, affected crops, specific symptoms, how it spreads, favorable conditions, economic impact, and specific IPM control measures with chemical names and rates.
-After searching, return ONLY valid JSON (no markdown, no extra text):
-{"diseaseName":"","pathogenType":"fungal|bacterial|viral|nematode|physiological","pathogenName":"specific pathogen scientific name","affectedPlants":["specific crop 1","specific crop 2"],"symptoms":["specific symptom 1","specific symptom 2","specific symptom 3","specific symptom 4"],"spreadMechanism":"specific spread mechanism from search","favorableConditions":"specific conditions","economicImpact":"specific yield loss data","control":{"cultural":["specific practice 1","specific practice 2"],"biological":["specific bioagent 1","specific bioagent 2"],"chemical":["specific fungicide name - specific rate per litre","specific fungicide 2 - rate"],"resistant_varieties":["specific variety name if found"],"ipmSummary":"specific integrated strategy for this disease"},"preventionTips":["specific tip 1","specific tip 2","specific tip 3"]}`;
+      systemPrompt = `You are a plant pathologist. Use web_search to find SPECIFIC, real information about the disease "${query}". 
+- Provide actual pathogen names, affected crops with real examples, specific symptoms (not generic leaf spots).
+- Control measures must include real chemical names and dosages (e.g., "Mancozeb 80WP - 2.5g/L"), biological agents with application methods.
+- Avoid generic phrases like "various crop plants" or "favorable conditions: high humidity".
+- Return ONLY valid JSON.`;
 
-    } else {
-      systemPrompt = "You are an entomologist and pest management expert. You MUST use the web_search tool to search for accurate, specific information about this pest before answering. Search for its scientific name, life cycle, damage it causes, and specific IPM control methods including pesticide names and dosages.";
-      userPrompt = `Search the web for comprehensive information about the pest: "${query}".
-Search for: its scientific name, pest type, crops it attacks, specific damage it causes, life stages, peak activity periods, economic threshold, and specific IPM control measures with pesticide names and rates.
-After searching, return ONLY valid JSON (no markdown, no extra text):
-{"pestName":"","scientificName":"specific scientific name","pestType":"insect|mite|nematode|rodent|mollusk|bird","affectedPlants":["specific crop 1","specific crop 2"],"damageDescription":"specific damage description from search","lifeStages":["specific stage 1","specific stage 2","specific stage 3"],"peakActivity":"specific season/conditions","economicThreshold":"specific threshold value","control":{"cultural":["specific practice 1","specific practice 2"],"biological":["specific natural enemy 1 - how to use","specific agent 2"],"mechanical":["specific trap type","specific barrier"],"chemical":["specific pesticide name - specific dosage","specific pesticide 2 - rate"],"ipmSummary":"specific integrated pest management strategy for this pest"},"safetyNotes":"specific safety precautions"}`;
+      userPrompt = `Search for specific data on the plant disease: "${query}".
+Find: causal pathogen (species name), exact affected crops list, specific symptoms (with descriptions of lesions, colours, patterns), spread mechanism (e.g., "water splash over 2m", "thrips transmission"), favourable conditions with numbers (e.g., "25-30°C, >90% RH for 6h"), economic impact (e.g., "yield loss 30-50% in [region]").
+Control measures must be actionable:
+- cultural: specific practices like "2-year rotation with non-host X"
+- biological: "Trichoderma harzianum applied as seed treatment 10g/kg"
+- chemical: "Azoxystrobin 250SC - 1.0ml/L, 7-day interval"
+- resistant_varieties: exact variety names
+- ipmSummary: concrete strategy
+
+Return ONLY valid JSON:
+{
+  "diseaseName": "",
+  "pathogenType": "fungal|bacterial|viral|nematode|physiological",
+  "pathogenName": "specific scientific name",
+  "affectedPlants": ["specific crop 1", "specific crop 2"],
+  "symptoms": ["symptom 1", "symptom 2", "symptom 3", "symptom 4"],
+  "spreadMechanism": "specific mechanism",
+  "favorableConditions": "specific numbers (temp, RH, etc.)",
+  "economicImpact": "specific % loss or $ value",
+  "control": {
+    "cultural": ["specific practice 1", "practice 2"],
+    "biological": ["specific agent - how to apply"],
+    "chemical": ["specific fungicide - rate per L/ha"],
+    "resistant_varieties": ["variety name if found"],
+    "ipmSummary": "specific integrated strategy"
+  },
+  "preventionTips": ["tip 1", "tip 2", "tip 3"]
+}`;
+
+    } else { // pest
+      systemPrompt = `You are an entomologist. Use web_search to find SPECIFIC, real information about the pest "${query}". 
+- Provide scientific name, exact host crops, detailed damage description (e.g., "leaf skeletonisation", "bore holes in stem").
+- Control: specific chemical names + dosages (e.g., "Cypermethrin 10EC - 10ml/20L water"), biological agents, trap types.
+- Avoid generic phrases like "various crops" or "causes physical damage".
+- Return ONLY valid JSON.`;
+
+      userPrompt = `Search for specific data on the pest: "${query}".
+Find: scientific name, pest type, exact affected plants, specific damage description, life stages (list 3-4), peak activity (month/season/conditions), economic threshold (e.g., "5 larvae per plant").
+Control measures must be concrete:
+- cultural: crop rotation with specific crop, timing
+- biological: specific predator/parasitoid (e.g., "Chrysoperla carnea - release 2 larvae/plant")
+- mechanical: specific trap (e.g., "pheromone trap Delta type - 4 traps/ha")
+- chemical: specific pesticide, dosage, timing
+- ipmSummary: step-by-step strategy
+
+Return ONLY valid JSON:
+{
+  "pestName": "",
+  "scientificName": "",
+  "pestType": "insect|mite|nematode|rodent|mollusk|bird",
+  "affectedPlants": ["specific crop 1", "crop 2"],
+  "damageDescription": "specific description",
+  "lifeStages": ["egg", "larva", "pupa", "adult"],
+  "peakActivity": "e.g., 'June-August, >25°C'",
+  "economicThreshold": "e.g., '10% infested plants'",
+  "control": {
+    "cultural": ["specific practice 1", "practice 2"],
+    "biological": ["specific enemy - application"],
+    "mechanical": ["specific trap/barrier"],
+    "chemical": ["chemical - dosage per L or ha"],
+    "ipmSummary": "specific integrated strategy"
+  },
+  "safetyNotes": "specific PPE or pre‑harvest interval"
+}`;
     }
 
-    // Try Claude with web search tool
-    try {
+    // Helper to call Claude and parse JSON
+    async function callClaude() {
       const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: {
@@ -313,40 +378,57 @@ After searching, return ONLY valid JSON (no markdown, no extra text):
         })
       });
 
-      if (claudeRes.ok) {
-        const claudeData = await claudeRes.json();
-        // Extract the final text block (after tool use)
-        const textBlocks = claudeData.content.filter(b => b.type === "text");
-        if (textBlocks.length > 0) {
-          const rawText = textBlocks.map(b => b.text || "").join("");
-          const clean = rawText.replace(/```json|```/g, "").trim();
-          try {
-            const parsed = JSON.parse(clean);
-            console.log("✅ Claude web search succeeded for:", query);
-            return res.json({ success: true, source: "claude-search", data: parsed });
-          } catch (e) {
-            console.log("⚠️ Claude JSON parse failed:", e.message);
-            console.log("Raw text was:", rawText.substring(0, 300));
-          }
-        }
-      } else {
+      if (!claudeRes.ok) {
         const errText = await claudeRes.text();
-        console.log("⚠️ Claude API returned", claudeRes.status, errText.substring(0, 200));
+        console.log(`Claude API error ${claudeRes.status}:`, errText.substring(0, 200));
+        return null;
       }
-    } catch (e) {
-      console.log("⚠️ Claude API error:", e.message);
+
+      const claudeData = await claudeRes.json();
+      const textBlocks = claudeData.content.filter(b => b.type === "text");
+      if (textBlocks.length === 0) return null;
+
+      const rawText = textBlocks.map(b => b.text || "").join("");
+      const clean = rawText.replace(/```json|```/g, "").trim();
+
+      try {
+        const parsed = JSON.parse(clean);
+        // Validate required fields exist and no generic content
+        if (type === "plant" && (!parsed.commonName || !parsed.scientificName)) return null;
+        if (type === "disease" && (!parsed.diseaseName || !parsed.pathogenName)) return null;
+        if (type === "pest" && (!parsed.pestName || !parsed.scientificName)) return null;
+        if (isGenericData(parsed, type)) return null;
+        return parsed;
+      } catch (e) {
+        console.log("JSON parse failed, raw start:", rawText.substring(0, 200));
+        return null;
+      }
     }
 
-    // Fallback — never return 500
-    console.log("Using built-in fallback for:", query);
-    return res.json({ success: true, source: "fallback", data: buildFallback(query, type) });
+    // Try Claude with web search (up to 2 attempts)
+    let finalData = null;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      finalData = await callClaude();
+      if (finalData) break;
+      console.log(`Attempt ${attempt} failed for ${query}, retrying...`);
+      await new Promise(r => setTimeout(r, 1000)); // short delay before retry
+    }
+
+    if (finalData) {
+      console.log(`✅ Specific data retrieved for ${query} (${type})`);
+      return res.json({ success: true, source: "claude-search", data: finalData });
+    } else {
+      // No generic fallback – return error so frontend can handle
+      console.log(`❌ Could not obtain specific information for ${query} after retries`);
+      return res.status(404).json({
+        success: false,
+        error: `Could not retrieve specific information about this ${type} from web search. Please try again with a more precise name or check spelling.`
+      });
+    }
 
   } catch (err) {
-    try {
-      return res.json({ success: true, source: "fallback", data: buildFallback(req.body.query || "Unknown", req.body.type || "plant") });
-    } catch(e2) {
-      res.status(500).json({ success: false, error: err.message });
-    }
+    console.error("Claude endpoint error:", err);
+    res.status(500).json({ success: false, error: "Internal server error. Please try again later." });
   }
 });
 
