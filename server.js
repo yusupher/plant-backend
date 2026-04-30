@@ -17,7 +17,6 @@ const PLANTNET_KEY = "2b104s5nNyqRjHHyiCJveuBwu";
 const ROBOFLOW_KEY = "33LnNNZCWrWy3FQGulD9";
 const ROBOFLOW_MODEL = "plant-dataset-ypln5-to68g/1";
 const PEST_MODEL = "insect-e746x-iuclt/1";
-// ✅ Use the exact name you set on Render: ANTHROPIC_API_KEY
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
 if (!ANTHROPIC_API_KEY) {
@@ -157,7 +156,7 @@ app.post("/detect-pest", upload.single("image"), async (req, res) => {
 });
 
 // ==============================
-// 🤖 CLAUDE AI COMPREHENSIVE INFO (USES ANTHROPIC_API_KEY)
+// 🤖 CLAUDE AI COMPREHENSIVE INFO (WITH CORRECT MODEL)
 // ==============================
 
 app.post("/claude-info", async (req, res) => {
@@ -239,6 +238,7 @@ app.post("/claude-info", async (req, res) => {
     }
 
     async function callClaude() {
+      // ✅ CORRECTED MODEL NAME
       const response = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: {
@@ -247,7 +247,7 @@ app.post("/claude-info", async (req, res) => {
           "anthropic-version": "2023-06-01"
         },
         body: JSON.stringify({
-          model: "claude-3-haiku-20240307",
+          model: "claude-3-5-haiku-20241022",  // <-- FIXED: valid model name
           max_tokens: 2000,
           system: systemPrompt,
           messages: [{ role: "user", content: userPrompt }]
@@ -294,7 +294,6 @@ app.post("/claude-info", async (req, res) => {
     if (finalResult) {
       return res.json({ success: true, source: "claude", data: finalResult });
     } else {
-      // Return the actual error from Claude if we have it, otherwise generic
       return res.json({ success: false, error: lastError || `Could not retrieve information for "${query}". Try a more precise name.` });
     }
   } catch (err) {
