@@ -253,37 +253,53 @@ app.post("/claude-info", async (req, res) => {
           messages: [{ role: "user", content: userPrompt }]
         })
       });
-      if (!response.ok) return null;
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`Claude API error ${response.status}:`, errorText);
+        return { error: `Claude API error ${response.status}: ${errorText.substring(0, 200)}` };
+      }
+
       const data = await response.json();
       const textBlock = data.content.find(c => c.type === "text");
-      if (!textBlock) return null;
-      const clean = textBlock.text.replace(/```json|```/g, "").trim();
+      if (!textBlock) return { error: "No text block in Claude response" };
+
+      const raw = textBlock.text;
+      const clean = raw.replace(/```json|```/g, "").trim();
       try {
         const parsed = JSON.parse(clean);
-        if (type === "plant" && !parsed.commonName && !parsed.scientificName) return null;
-        if (type === "disease" && !parsed.diseaseName) return null;
-        if (type === "pest" && !parsed.pestName) return null;
-        return parsed;
+        if (type === "plant" && !parsed.commonName && !parsed.scientificName) return { error: "Missing required fields" };
+        if (type === "disease" && !parsed.diseaseName) return { error: "Missing diseaseName" };
+        if (type === "pest" && !parsed.pestName) return { error: "Missing pestName" };
+        return { success: true, data: parsed };
       } catch (e) {
-        return null;
+        return { error: `JSON parse error: ${e.message}. Raw: ${raw.substring(0, 200)}` };
       }
     }
 
-    let finalData = null;
+    let finalResult = null;
+    let lastError = null;
     for (let attempt = 1; attempt <= 2; attempt++) {
-      finalData = await callClaude();
-      if (finalData) break;
+      const result = await callClaude();
+      if (result.success) {
+        finalResult = result.data;
+        break;
+      } else if (result.error) {
+        lastError = result.error;
+        console.log(`Attempt ${attempt} failed: ${lastError}`);
+      }
       await new Promise(r => setTimeout(r, 1000));
     }
 
-    if (finalData) {
-      return res.json({ success: true, source: "claude", data: finalData });
+    if (finalResult) {
+      return res.json({ success: true, source: "claude", data: finalResult });
     } else {
-      return res.json({ success: false, error: `Could not retrieve information for "${query}". Try a more precise name.` });
+      // Return the actual error from Claude if we have it, otherwise generic
+      return res.json({ success: false, error: lastError || `Could not retrieve information for "${query}". Try a more precise name.` });
     }
   } catch (err) {
-    console.error(err);
-    res.json({ success: false, error: "Internal server error" });
+    console.error("Claude endpoint error:", err);
+    res.json({ success: false, error: "Internal server error: " + err.message });
   }
 });
 
