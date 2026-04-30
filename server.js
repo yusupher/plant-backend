@@ -11,14 +11,16 @@ app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
 // ==============================
-// 🔑 ENV VARIABLES (RENDER)
+// 🔑 ENV KEYS (RENDER)
 // ==============================
 const PLANTNET_KEY = process.env.PLANTNET_KEY;
-const ROBOFLOW_KEY = process.env.ROBOFLOW_KEY;
+const ROBOFLOW_KEY = process.env.ROBOFLOW_KEY; // MUST be PRIVATE KEY
+const PLANT_ID_KEY = process.env.PLANT_ID_KEY;
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+
+// Models
 const ROBOFLOW_PLANT_MODEL = "plant-dataset-ypln5-to68g/1";
 const ROBOFLOW_PEST_MODEL = "insect-e746x-iuclt/1";
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-const PLANT_ID_KEY = process.env.PLANT_ID_KEY;
 
 // ==============================
 // 🟢 HEALTH CHECK
@@ -31,12 +33,39 @@ app.get("/", (req, res) => {
 });
 
 // ==============================
+// 🔥 ROBoflow HELPER (FIXED)
+// ==============================
+async function runRoboflow(model, base64) {
+  const url = `https://serverless.roboflow.com/${model}?api_key=${ROBOFLOW_KEY}`;
+
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: base64
+    });
+
+    const text = await res.text();
+
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { error: "Invalid JSON", raw: text };
+    }
+  } catch (err) {
+    return { error: err.message };
+  }
+}
+
+// ==============================
 // 🌿 PLANT IDENTIFICATION (PlantNet)
 // ==============================
 app.post("/identify", upload.single("image"), async (req, res) => {
   try {
     if (!req.file)
-      return res.status(400).json({ success: false, error: "No image uploaded" });
+      return res.status(400).json({ error: "No image uploaded" });
 
     const form = new FormData();
     form.append("images", req.file.buffer, {
@@ -62,7 +91,7 @@ app.post("/identify", upload.single("image"), async (req, res) => {
     });
 
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -72,38 +101,21 @@ app.post("/identify", upload.single("image"), async (req, res) => {
 app.post("/disease", upload.single("image"), async (req, res) => {
   try {
     if (!req.file)
-      return res.status(400).json({ success: false, error: "No image uploaded" });
+      return res.status(400).json({ error: "No image uploaded" });
 
     const base64 = req.file.buffer.toString("base64");
 
-    // =======================
-    // 🔹 ROBOFLOW DISEASE MODEL
-    // =======================
-    try {
-      const rfUrl = `https://serverless.roboflow.com/${ROBOFLOW_PLANT_MODEL}?api_key=${ROBOFLOW_KEY}`;
+    const rf = await runRoboflow(ROBOFLOW_PLANT_MODEL, base64);
 
-      const rfRes = await fetch(rfUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: base64
+    if (!rf.error && rf.predictions) {
+      return res.json({
+        success: true,
+        source: "Roboflow",
+        data: rf
       });
-
-      const rfData = await rfRes.json();
-
-      if (rfData && !rfData.error) {
-        return res.json({
-          success: true,
-          source: "Roboflow",
-          data: rfData
-        });
-      }
-    } catch (err) {
-      console.log("Roboflow disease failed:", err.message);
     }
 
-    // =======================
-    // 🔹 Plant.id fallback
-    // =======================
+    // fallback Plant.id
     const plantRes = await fetch(
       "https://api.plant.id/v3/health_assessment",
       {
@@ -123,55 +135,39 @@ app.post("/disease", upload.single("image"), async (req, res) => {
 
     res.json({
       success: true,
-      source: "Plant.id (fallback)",
+      source: "Plant.id fallback",
       data: plantData
     });
 
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ error: err.message });
   }
 });
 
 // ==============================
-// 🐛 PEST DETECTION (FIXED)
+// 🐛 PEST DETECTION (FIXED & WORKING)
 // ==============================
 app.post("/detect-pest", upload.single("image"), async (req, res) => {
   try {
     if (!req.file)
-      return res.status(400).json({
-        success: false,
-        error: "No image uploaded"
-      });
+      return res.status(400).json({ error: "No image uploaded" });
 
     const base64 = req.file.buffer.toString("base64");
 
-    const url = `https://serverless.roboflow.com/${ROBOFLOW_PEST_MODEL}?api_key=${ROBOFLOW_KEY}`;
+    const rf = await runRoboflow(ROBOFLOW_PEST_MODEL, base64);
 
-    const rfRes = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded"
-      },
-      body: base64
-    });
-
-    const text = await rfRes.text();
-
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch {
+    if (rf.error) {
       return res.json({
         success: false,
-        error: "Invalid Roboflow response",
-        raw: text
+        error: rf.error,
+        raw: rf.raw
       });
     }
 
     let best = null;
 
-    if (data.predictions && data.predictions.length > 0) {
-      best = data.predictions.reduce((a, b) =>
+    if (rf.predictions && rf.predictions.length > 0) {
+      best = rf.predictions.reduce((a, b) =>
         b.confidence > a.confidence ? b : a
       );
     }
@@ -180,14 +176,11 @@ app.post("/detect-pest", upload.single("image"), async (req, res) => {
       success: true,
       result: best ? best.class : "No pest detected",
       confidence: best ? Math.round(best.confidence * 100) : 0,
-      raw: data
+      raw: rf
     });
 
   } catch (err) {
-    res.status(500).json({
-      success: false,
-      error: err.message
-    });
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -198,15 +191,7 @@ app.post("/comprehensive-info", async (req, res) => {
   try {
     const { query, type } = req.body;
 
-    let prompt = "";
-
-    if (type === "plant") {
-      prompt = `Return structured JSON plant info for: ${query}`;
-    } else if (type === "disease") {
-      prompt = `Return structured JSON plant disease info for: ${query}`;
-    } else if (type === "pest") {
-      prompt = `Return structured JSON pest info for: ${query}`;
-    }
+    const prompt = `Return structured JSON ${type} info for: ${query}`;
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -225,12 +210,11 @@ app.post("/comprehensive-info", async (req, res) => {
     const data = await response.json();
 
     const text = data.content?.map(b => b.text || "").join("") || "";
-    const clean = text.replace(/```json|```/g, "").trim();
 
     try {
-      return res.json(JSON.parse(clean));
+      res.json(JSON.parse(text));
     } catch {
-      return res.json({ raw: text });
+      res.json({ raw: text });
     }
 
   } catch (err) {
