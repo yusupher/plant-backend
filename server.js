@@ -8,7 +8,7 @@ const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 
 /* =========================
-   ✅ FIXED CORS (IMPORTANT)
+   ✅ CORS FIXED
 ========================= */
 app.use(cors({
   origin: "*",
@@ -19,7 +19,7 @@ app.use(cors({
 app.use(express.json({ limit: "10mb" }));
 
 /* =========================
-   🔑 ENV KEYS (RENDER)
+   🔑 ENV KEYS
 ========================= */
 const PLANTNET_KEY = process.env.PLANTNET_KEY;
 const ROBOFLOW_KEY = process.env.ROBOFLOW_KEY;
@@ -27,11 +27,11 @@ const PLANT_ID_KEY = process.env.PLANT_ID_KEY;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
 /* =========================
-   🤖 MODELS
+   🤖 MODELS (IMPORTANT FIX)
 ========================= */
-const PLANT_MODEL = "plant-dataset-ypln5-to68g/1";
-const DISEASE_MODEL = "plant-disease-xqd8b-tvz68/1";
-const INSECT_MODEL = "insect-e746x-iuclt/1";
+const PLANT_MODEL = "plant-dataset-ypln5-to68g";
+const DISEASE_MODEL = "plant-disease-xqd8b-tvz68";
+const INSECT_MODEL = "insect-e746x-iuclt";
 
 /* =========================
    🟢 HEALTH CHECK
@@ -50,10 +50,10 @@ app.get("/", (req, res) => {
 });
 
 /* =========================
-   🔥 ROBOFLOW HELPER
+   🔥 ROBOFLOW FIXED HELPER
 ========================= */
 async function runRoboflow(model, base64) {
-  const url = `https://serverless.roboflow.com/${model}?api_key=${ROBOFLOW_KEY}`;
+  const url = `https://detect.roboflow.com/${model}/1?api_key=${ROBOFLOW_KEY}`;
 
   try {
     const res = await fetch(url, {
@@ -108,8 +108,6 @@ app.post("/identify", upload.single("image"), async (req, res) => {
 ========================= */
 app.post("/disease", upload.single("image"), async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ error: "No image uploaded" });
-
     const base64 = req.file.buffer.toString("base64");
 
     const rf = await runRoboflow(DISEASE_MODEL, base64);
@@ -122,7 +120,6 @@ app.post("/disease", upload.single("image"), async (req, res) => {
       });
     }
 
-    // fallback Plant.id
     const plantRes = await fetch(
       "https://api.plant.id/v3/health_assessment",
       {
@@ -156,8 +153,6 @@ app.post("/disease", upload.single("image"), async (req, res) => {
 ========================= */
 app.post("/detect-insect", upload.single("image"), async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ error: "No image uploaded" });
-
     const base64 = req.file.buffer.toString("base64");
 
     const rf = await runRoboflow(INSECT_MODEL, base64);
@@ -165,14 +160,13 @@ app.post("/detect-insect", upload.single("image"), async (req, res) => {
     if (rf.error) {
       return res.json({
         success: false,
-        error: rf.error,
-        raw: rf
+        error: rf.error
       });
     }
 
     let best = null;
 
-    if (rf.predictions?.length > 0) {
+    if (rf.predictions?.length) {
       best = rf.predictions.reduce((a, b) =>
         b.confidence > a.confidence ? b : a
       );
@@ -180,7 +174,7 @@ app.post("/detect-insect", upload.single("image"), async (req, res) => {
 
     res.json({
       success: true,
-      result: best ? best.class : "No insect detected",
+      result: best?.class || "No insect detected",
       confidence: best ? Math.round(best.confidence * 100) : 0,
       raw: rf
     });
@@ -191,15 +185,17 @@ app.post("/detect-insect", upload.single("image"), async (req, res) => {
 });
 
 /* =========================
-   🌾 COMBINE ANALYSIS (OPTIONAL)
+   🌾 FULL ANALYSIS (FIXED)
 ========================= */
 app.post("/analyze-all", upload.single("image"), async (req, res) => {
   try {
     const base64 = req.file.buffer.toString("base64");
 
-    const plant = await runRoboflow(PLANT_MODEL, base64);
-    const disease = await runRoboflow(DISEASE_MODEL, base64);
-    const insect = await runRoboflow(INSECT_MODEL, base64);
+    const [plant, disease, insect] = await Promise.all([
+      runRoboflow(PLANT_MODEL, base64),
+      runRoboflow(DISEASE_MODEL, base64),
+      runRoboflow(INSECT_MODEL, base64)
+    ]);
 
     res.json({
       success: true,
@@ -214,7 +210,7 @@ app.post("/analyze-all", upload.single("image"), async (req, res) => {
 });
 
 /* =========================
-   🤖 AI INFO (CLAUDE)
+   🤖 AI INFO
 ========================= */
 app.post("/comprehensive-info", async (req, res) => {
   try {
