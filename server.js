@@ -11,7 +11,7 @@ app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
 // ==============================
-// KEYS
+// API KEYS (replace with your own if needed)
 // ==============================
 const PLANTNET_KEY = "2b104s5nNyqRjHHyiCJveuBwu";
 const ROBOFLOW_KEY = "33LnNNZCWrWy3FQGulD9";
@@ -27,7 +27,7 @@ app.get("/", (req, res) => {
 });
 
 // ==============================
-// 🌿 PLANT IDENTIFICATION
+// 🌿 PLANT IDENTIFICATION (PlantNet)
 // ==============================
 app.post("/identify", upload.single("image"), async (req, res) => {
   try {
@@ -45,7 +45,7 @@ app.post("/identify", upload.single("image"), async (req, res) => {
 });
 
 // ==============================
-// 🦠 DISEASE DETECTION
+// 🦠 DISEASE DETECTION (Roboflow + fallback)
 // ==============================
 app.post("/disease", upload.single("image"), async (req, res) => {
   try {
@@ -79,7 +79,7 @@ app.post("/disease", upload.single("image"), async (req, res) => {
 });
 
 // ==============================
-// 🐛 PEST DETECTION
+// 🐛 PEST DETECTION (Roboflow)
 // ==============================
 app.post("/detect-pest", upload.single("image"), async (req, res) => {
   try {
@@ -101,8 +101,7 @@ app.post("/detect-pest", upload.single("image"), async (req, res) => {
 });
 
 // ==============================
-// 🤖 CLAUDE AI COMPREHENSIVE INFO
-// (fixed model: claude-3-5-haiku-20241022)
+// 🤖 CLAUDE AI COMPREHENSIVE INFO (FIXED MODEL)
 // ==============================
 function buildPrompt(query, type) {
   if (type === "plant") {
@@ -205,7 +204,7 @@ async function callClaude(query, type) {
       "anthropic-version": "2023-06-01"
     },
     body: JSON.stringify({
-      model: "model: "claude-3-5-sonnet-20241022",   // ✅ FIXED: replaced deprecated "claude-3-haiku-20240307"
+      model: "claude-3-5-sonnet-20241022",   // ✅ FIXED – ACTIVE MODEL
       max_tokens: 2000,
       system: system,
       messages: [{ role: "user", content: user }]
@@ -222,8 +221,6 @@ async function callClaude(query, type) {
   if (!textBlock) throw new Error("No text block in Claude response");
 
   const clean = textBlock.text.replace(/```json|```/g, "").trim();
-
-  // Extract JSON even if there is surrounding text
   const jsonMatch = clean.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error("No JSON object found in Claude response");
 
@@ -251,7 +248,6 @@ app.post("/claude-info", async (req, res) => {
 
     console.error(`❌ All attempts failed for "${query}": ${lastError}`);
     return res.json({ success: false, error: lastError });
-
   } catch (err) {
     console.error("Claude endpoint error:", err);
     res.json({ success: false, error: err.message });
