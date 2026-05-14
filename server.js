@@ -350,6 +350,128 @@ app.get('/kb/corrections', (req, res) => {
   res.json(out);
 });
 
+// ============================================================
+// ADD THESE LINES TO YOUR server.js ON RENDER
+// Place them AFTER your existing routes, BEFORE app.listen()
+// ============================================================
+
+const fs = require('fs');
+const path = require('path');
+
+// Path to persistent KB file — Render keeps files in /tmp between restarts
+// For true persistence, use a free DB like MongoDB Atlas or just re-download
+// from the owner's phone after each Render restart
+const KB_FILE = path.join(__dirname, 'offline_kb.json');
+
+// Helper: load KB from disk
+function loadKB() {
+  try {
+    if (fs.existsSync(KB_FILE)) return JSON.parse(fs.readFileSync(KB_FILE, 'utf8'));
+  } catch(e) {}
+  return {};
+}
+
+// Helper: save KB to disk
+function saveKB(data) {
+  try { fs.writeFileSync(KB_FILE, JSON.stringify(data, null, 2)); return true; }
+  catch(e) { return false; }
+}
+
+// ── GET /kb — any user downloads the full KB ────────────────────────────────
+app.get('/kb', (req, res) => {
+  const kb = loadKB();
+  // Strip renderedHTML from public download to save bandwidth
+  const clean = {};
+  Object.entries(kb).forEach(([k, v]) => {
+    clean[k] = { ...v, renderedHTML: '' }; // data stays, HTML stripped (re-rendered on device)
+  });
+  res.json({ success: true, data: clean, count: Object.keys(clean).length });
+});
+
+// ── POST /kb/sync — owner pushes KB entries ─────────────────────────────────
+app.post('/kb/sync', (req, res) => {
+  const { ownerKey, entries } = req.body;
+  // Simple owner auth — use same password as your app
+  if (ownerKey !== 'yusupher01') {
+    return res.status(403).json({ success: false, error: 'Unauthorized' });
+  }
+  if (!entries || typeof entries !== 'object') {
+    return res.status(400).json({ success: false, error: 'Invalid entries' });
+  }
+  const existing = loadKB();
+  // Merge — owner entries win
+  const merged = { ...existing };
+  Object.entries(entries).forEach(([k, v]) => {
+    merged[k] = { ...v, renderedHTML: '' }; // don't store HTML on server
+  });
+  const ok = saveKB(merged);
+  res.json({ success: ok, count: Object.keys(merged).length });
+});
+
+// ── DELETE /kb/:id — owner deletes an entry ─────────────────────────────────
+app.delete('/kb/:id', (req, res) => {
+  const { ownerKey } = req.body;
+  if (ownerKey !== 'yusupher01') {
+    return res.status(403).json({ success: false, error: 'Unauthorized' });
+  }
+  const kb = loadKB();
+  delete kb[req.params.id];
+  const ok = saveKB(kb);
+  res.json({ success: ok });
+});
+
+// ── POST /kb/corrections — download as corrections.json format ──────────────
+app.get('/kb/corrections', (req, res) => {
+  const kb = loadKB();
+  const out = {};
+  Object.values(kb).forEach(e => {
+    const key = (e.name||'').toLowerCase().trim();
+    if (!key) return;
+    out[key] = {
+      name: e.name, type: e.type,
+      scientific: e.data?.scientific || e.data?.scientificName || '',
+      family: e.data?.family || '',
+      importance: e.data?.importance || (e.data?.uses||[]).join('; ') || '',
+      description: e.data?.description || '',
+      symptoms: e.data?.symptoms || [],
+      control: e.data?.control || {},
+      phytochemicals: e.data?.phytochemicals || {},
+      localNames: e.data?.localNamesWestAfrica || {},
+      ownerNotes: e.data?.ownerNotes || '',
+      ownerSure: e.correctedBy === 'owner',
+      savedAt: e.savedAt
+    };
+  });
+  res.setHeader('Content-Disposition', 'attachment; filename=corrections.json');
+  res.json(out);
+});
+
+
+// ── Image storage for visual matching on all phones ──────────────────────────
+const KB_IMAGES = {}; // In-memory image store (resets on Render restart — owner re-pushes)
+
+// GET /kb/image/:id — any phone downloads a saved image
+app.get('/kb/image/:id', (req, res) => {
+  const img = KB_IMAGES[req.params.id];
+  if (!img) return res.status(404).json({ success: false, error: 'No image' });
+  // Return as base64 data URL
+  const base64 = img.replace(/^data:image\/\w+;base64,/, '');
+  const buf = Buffer.from(base64, 'base64');
+  res.setHeader('Content-Type', 'image/jpeg');
+  res.send(buf);
+});
+
+// POST /kb/image/:id — owner pushes an image
+app.post('/kb/image/:id', (req, res) => {
+  const { ownerKey, imageData } = req.body;
+  if (ownerKey !== 'yusupher01') {
+    return res.status(403).json({ success: false, error: 'Unauthorized' });
+  }
+  if (!imageData) return res.status(400).json({ success: false, error: 'No image data' });
+  KB_IMAGES[req.params.id] = imageData;
+  res.json({ success: true });
+});
+
 // ==============================
 // START SERVER
 // ==============================
