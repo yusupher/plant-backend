@@ -11,7 +11,7 @@ app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
 // ==============================
-// API KEYS (replace with your own if needed)
+// KEYS
 // ==============================
 const PLANTNET_KEY = "2b104s5nNyqRjHHyiCJveuBwu";
 const ROBOFLOW_KEY = "33LnNNZCWrWy3FQGulD9";
@@ -27,7 +27,7 @@ app.get("/", (req, res) => {
 });
 
 // ==============================
-// 🌿 PLANT IDENTIFICATION (PlantNet)
+// 🌿 PLANT IDENTIFICATION
 // ==============================
 app.post("/identify", upload.single("image"), async (req, res) => {
   try {
@@ -45,7 +45,7 @@ app.post("/identify", upload.single("image"), async (req, res) => {
 });
 
 // ==============================
-// 🦠 DISEASE DETECTION (Roboflow + fallback)
+// 🦠 DISEASE DETECTION
 // ==============================
 app.post("/disease", upload.single("image"), async (req, res) => {
   try {
@@ -79,7 +79,7 @@ app.post("/disease", upload.single("image"), async (req, res) => {
 });
 
 // ==============================
-// 🐛 PEST DETECTION (Roboflow)
+// 🐛 PEST DETECTION
 // ==============================
 app.post("/detect-pest", upload.single("image"), async (req, res) => {
   try {
@@ -101,7 +101,8 @@ app.post("/detect-pest", upload.single("image"), async (req, res) => {
 });
 
 // ==============================
-// 🤖 CLAUDE AI COMPREHENSIVE INFO (FIXED MODEL)
+// 🤖 CLAUDE AI COMPREHENSIVE INFO
+// (same prompts verified working in live test)
 // ==============================
 function buildPrompt(query, type) {
   if (type === "plant") {
@@ -204,7 +205,7 @@ async function callClaude(query, type) {
       "anthropic-version": "2023-06-01"
     },
     body: JSON.stringify({
-      model: "claude-3-5-sonnet-20241022",   // ✅ FIXED – ACTIVE MODEL
+      model: "claude-3-haiku-20240307",
       max_tokens: 2000,
       system: system,
       messages: [{ role: "user", content: user }]
@@ -221,6 +222,8 @@ async function callClaude(query, type) {
   if (!textBlock) throw new Error("No text block in Claude response");
 
   const clean = textBlock.text.replace(/```json|```/g, "").trim();
+
+  // Extract JSON even if there is surrounding text
   const jsonMatch = clean.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error("No JSON object found in Claude response");
 
@@ -248,6 +251,7 @@ app.post("/claude-info", async (req, res) => {
 
     console.error(`❌ All attempts failed for "${query}": ${lastError}`);
     return res.json({ success: false, error: lastError });
+
   } catch (err) {
     console.error("Claude endpoint error:", err);
     res.json({ success: false, error: err.message });
@@ -255,127 +259,111 @@ app.post("/claude-info", async (req, res) => {
 });
 
 
+// ==============================
+// 📴 OFFLINE KNOWLEDGE BASE (shared across all phones)
+// ==============================
+const fs = require("fs");
+const path = require("path");
 
-// ============================================================
-// ADD THESE LINES TO YOUR server.js ON RENDER
-// Place them AFTER your existing routes, BEFORE app.listen()
-// ============================================================
+// Storage location. On Render, set a persistent disk mounted at /data and
+// the env var KB_DIR=/data to keep entries across restarts. Falls back to
+// local folder (ephemeral — resets on redeploy) if not set.
+const KB_DIR = process.env.KB_DIR || path.join(__dirname, "kb_store");
+const KB_FILE = path.join(KB_DIR, "kb.json");
+const KB_IMG_DIR = path.join(KB_DIR, "images");
 
-const fs = require('fs');
-const path = require('path');
+// Ensure folders exist
+try {
+  if (!fs.existsSync(KB_DIR)) fs.mkdirSync(KB_DIR, { recursive: true });
+  if (!fs.existsSync(KB_IMG_DIR)) fs.mkdirSync(KB_IMG_DIR, { recursive: true });
+} catch (e) { console.error("KB dir error:", e.message); }
 
-// Path to persistent KB file — Render keeps files in /tmp between restarts
-// For true persistence, use a free DB like MongoDB Atlas or just re-download
-// from the owner's phone after each Render restart
-const KB_FILE = path.join(__dirname, 'offline_kb.json');
-
-// Helper: load KB from disk
-function loadKB() {
+function kbReadAll() {
   try {
-    if (fs.existsSync(KB_FILE)) return JSON.parse(fs.readFileSync(KB_FILE, 'utf8'));
-  } catch(e) {}
-  return {};
+    if (!fs.existsSync(KB_FILE)) return {};
+    return JSON.parse(fs.readFileSync(KB_FILE, "utf8") || "{}");
+  } catch (e) { console.error("KB read error:", e.message); return {}; }
+}
+function kbWriteAll(db) {
+  try { fs.writeFileSync(KB_FILE, JSON.stringify(db)); return true; }
+  catch (e) { console.error("KB write error:", e.message); return false; }
 }
 
-// Helper: save KB to disk
-function saveKB(data) {
-  try { fs.writeFileSync(KB_FILE, JSON.stringify(data, null, 2)); return true; }
-  catch(e) { return false; }
-}
-
-// ── GET /kb — any user downloads the full KB ────────────────────────────────
-app.get('/kb', (req, res) => {
-  const kb = loadKB();
-  // Strip renderedHTML from public download to save bandwidth
-  const clean = {};
-  Object.entries(kb).forEach(([k, v]) => {
-    clean[k] = { ...v, renderedHTML: '' }; // data stays, HTML stripped (re-rendered on device)
-  });
-  res.json({ success: true, data: clean, count: Object.keys(clean).length });
+// GET /kb — all phones download the shared knowledge base
+app.get("/kb", (req, res) => {
+  const db = kbReadAll();
+  res.json({ success: true, count: Object.keys(db).length, data: db });
 });
 
-// ── POST /kb/sync — owner pushes KB entries ─────────────────────────────────
-app.post('/kb/sync', (req, res) => {
-  const { ownerKey, entries } = req.body;
-  // Simple owner auth — use same password as your app
-  if (ownerKey !== 'yusupher01') {
-    return res.status(403).json({ success: false, error: 'Unauthorized' });
+// POST /kb/sync — owner pushes their entries (merged into shared store)
+app.post("/kb/sync", (req, res) => {
+  try {
+    const { ownerKey, entries } = req.body;
+    if (ownerKey !== OWNER_PASSWORD) return res.status(403).json({ success: false, error: "Unauthorized" });
+    if (!entries || typeof entries !== "object") return res.status(400).json({ success: false, error: "No entries" });
+
+    const db = kbReadAll();
+    let added = 0;
+    for (const [id, entry] of Object.entries(entries)) {
+      // Don't store huge rendered HTML or base64 images inside kb.json — keep it light.
+      // Images are stored separately via /kb/image/:id
+      const light = { ...entry };
+      delete light.renderedHTML; // phones keep their own rendered copy; re-render from data offline
+      db[id] = light;
+      added++;
+    }
+    kbWriteAll(db);
+    res.json({ success: true, count: Object.keys(db).length, added });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
   }
-  if (!entries || typeof entries !== 'object') {
-    return res.status(400).json({ success: false, error: 'Invalid entries' });
+});
+
+// POST /kb/image/:id — owner uploads an image (base64 data URL) for an entry
+app.post("/kb/image/:id", (req, res) => {
+  try {
+    const { ownerKey, imageData } = req.body;
+    if (ownerKey !== OWNER_PASSWORD) return res.status(403).json({ success: false, error: "Unauthorized" });
+    if (!imageData) return res.status(400).json({ success: false, error: "No imageData" });
+
+    // Strip data URL prefix
+    const base64 = imageData.replace(/^data:image\/\w+;base64,/, "");
+    const safeId = String(req.params.id).replace(/[^a-zA-Z0-9_\-]/g, "_");
+    fs.writeFileSync(path.join(KB_IMG_DIR, safeId + ".jpg"), Buffer.from(base64, "base64"));
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
   }
-  const existing = loadKB();
-  // Merge — owner entries win
-  const merged = { ...existing };
-  Object.entries(entries).forEach(([k, v]) => {
-    merged[k] = { ...v, renderedHTML: '' }; // don't store HTML on server
-  });
-  const ok = saveKB(merged);
-  res.json({ success: ok, count: Object.keys(merged).length });
 });
 
-// ── DELETE /kb/:id — owner deletes an entry ─────────────────────────────────
-app.delete('/kb/:id', (req, res) => {
-  const { ownerKey } = req.body;
-  if (ownerKey !== 'yusupher01') {
-    return res.status(403).json({ success: false, error: 'Unauthorized' });
+// GET /kb/image/:id — any phone downloads an entry's image for visual matching
+app.get("/kb/image/:id", (req, res) => {
+  try {
+    const safeId = String(req.params.id).replace(/[^a-zA-Z0-9_\-]/g, "_");
+    const file = path.join(KB_IMG_DIR, safeId + ".jpg");
+    if (!fs.existsSync(file)) return res.status(404).json({ success: false, error: "Not found" });
+    res.setHeader("Content-Type", "image/jpeg");
+    res.send(fs.readFileSync(file));
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
   }
-  const kb = loadKB();
-  delete kb[req.params.id];
-  const ok = saveKB(kb);
-  res.json({ success: ok });
 });
 
-// ── POST /kb/corrections — download as corrections.json format ──────────────
-app.get('/kb/corrections', (req, res) => {
-  const kb = loadKB();
-  const out = {};
-  Object.values(kb).forEach(e => {
-    const key = (e.name||'').toLowerCase().trim();
-    if (!key) return;
-    out[key] = {
-      name: e.name, type: e.type,
-      scientific: e.data?.scientific || e.data?.scientificName || '',
-      family: e.data?.family || '',
-      importance: e.data?.importance || (e.data?.uses||[]).join('; ') || '',
-      description: e.data?.description || '',
-      symptoms: e.data?.symptoms || [],
-      control: e.data?.control || {},
-      phytochemicals: e.data?.phytochemicals || {},
-      localNames: e.data?.localNamesWestAfrica || {},
-      ownerNotes: e.data?.ownerNotes || '',
-      ownerSure: e.correctedBy === 'owner',
-      savedAt: e.savedAt
-    };
-  });
-  res.setHeader('Content-Disposition', 'attachment; filename=corrections.json');
-  res.json(out);
-});
-
-
-// ── Image storage for visual matching on all phones ──────────────────────────
-const KB_IMAGES = {}; // In-memory image store (resets on Render restart — owner re-pushes)
-
-// GET /kb/image/:id — any phone downloads a saved image
-app.get('/kb/image/:id', (req, res) => {
-  const img = KB_IMAGES[req.params.id];
-  if (!img) return res.status(404).json({ success: false, error: 'No image' });
-  // Return as base64 data URL
-  const base64 = img.replace(/^data:image\/\w+;base64,/, '');
-  const buf = Buffer.from(base64, 'base64');
-  res.setHeader('Content-Type', 'image/jpeg');
-  res.send(buf);
-});
-
-// POST /kb/image/:id — owner pushes an image
-app.post('/kb/image/:id', (req, res) => {
-  const { ownerKey, imageData } = req.body;
-  if (ownerKey !== 'yusupher01') {
-    return res.status(403).json({ success: false, error: 'Unauthorized' });
+// DELETE /kb/:id — owner removes an entry
+app.post("/kb/delete/:id", (req, res) => {
+  try {
+    const { ownerKey } = req.body;
+    if (ownerKey !== OWNER_PASSWORD) return res.status(403).json({ success: false, error: "Unauthorized" });
+    const db = kbReadAll();
+    const id = req.params.id;
+    if (db[id]) { delete db[id]; kbWriteAll(db); }
+    const safeId = String(id).replace(/[^a-zA-Z0-9_\-]/g, "_");
+    const imgFile = path.join(KB_IMG_DIR, safeId + ".jpg");
+    if (fs.existsSync(imgFile)) fs.unlinkSync(imgFile);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
   }
-  if (!imageData) return res.status(400).json({ success: false, error: 'No image data' });
-  KB_IMAGES[req.params.id] = imageData;
-  res.json({ success: true });
 });
 
 // ==============================
